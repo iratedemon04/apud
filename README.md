@@ -34,3 +34,8 @@ dotnet test
 ```
 
 Status: **Module 1 (scaffold)** — see `docs/STATE.md`.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
