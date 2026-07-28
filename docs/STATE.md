@@ -2,10 +2,9 @@
 *(Session-survival file. THIS repo copy is authoritative; a fresh session reading this + docs/PLAN.md can continue without re-explaining. Update at end of every session and module close.)*
 
 ## Now
-- **Module 1 (Scaffold) BUILT — awaiting user test-drive + "move on".**
-- His checklist: double-click `publish\Apud\Apud.exe` → window titled "Apud" with File/Help menus and "Ready." message bar; Alt+F4 exits.
-- Environment note: .NET 8 SDK 8.0.423 was installed via winget this session (machine had runtime only).
-- Next module on approval: **Module 2 — MARC model + .mrk round-trip** (first real code: `MarcRecord.cs` + `MrkRoundTripTests.cs`; verify MarcEdit literal-$ convention against real MarcEdit output before coding the serializer).
+- **Module 1 ACCEPTED by user ("works perfectly") — Module 2 step list proposed, awaiting GO.**
+- Module 2 = MARC model + .mrk round-trip. Steps proposed: (1) verify MarcEdit literal-$ / .mrk dialect details against a real MarcEdit-produced file BEFORE coding; (2) MarcRecord/MarcField/MarcSubfield model + Leader helpers; (3) MrkReader with recoverable diagnostics; (4) MrkWriter; (5) round-trip test suite incl. diacritics, blank indicators, edge cases + first tests against his real record shapes (synthetic copies, NOT his files); (6) module close: STATE update, commit, push.
+- Environment note: .NET 8 SDK 8.0.423 installed via winget (machine had runtime only). Git identity: repo-local iratedemon04 <iratedemon04@gmail.com>; history rewritten 2026-07-27 to purge old-account attribution (ranakamikaze), force-pushed by user; contributors list verified clean via API (graph cache may lag).
 
 ## Module sequence (user gates every transition — build ONLY current module)
 1. Scaffold · 2. MARC model + .mrk · 3. .mrc ISO 2709 · 4. Database · 5. Import/Export/Viewer · 6. Editor+keymap+templates · 7. F8 fixed-field dialogs · 8. AUT+F3 · 9. Ctrl+L pipeline · 10. Settings/i18n/help · 11. Sync (SFTP) · 12. Distribution (GitHub repo created BY USER here, installer, manual)
@@ -27,6 +26,6 @@
 - Editor "spike" (throwaway UI prototype) proposed by Claude, REJECTED after discussion: user's option-value argument — core layers (Marc.Core/Apud.Data) are UI-independent, so a Module-6 UI surprise costs only thin-layer rework, not weeks; insurance not worth premium. Original 12-module sequence stands. Guiding frame: zero invention, 1960s solved problem, assembly not research; all durable logic lives below Apud.App.
 
 ## Next from user
-- **Test-drive Module 1 (run Apud.exe) → say "move on" (or fixes).**
+- **GO on Module 2 step list.**
 - §6.2 keymap red-pen — due at START of Module 6, not before.
 - GitHub repo creation — Module 12, I'll specify what I need then.
