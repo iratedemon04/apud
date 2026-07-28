@@ -1,0 +1,168 @@
+using Apud.Data;
+using Marc.Core;
+using Marc.Core.Mrk;
+
+namespace Apud.Tests;
+
+/// <summary>
+/// The DB layer's contract: what goes in comes out identical (proved via .mrk
+/// serialization equality), and fields + heading links live or die together.
+/// </summary>
+public class RecordRepositoryTests : IDisposable
+{
+    private readonly ApudDatabase _db = ApudDatabase.OpenInMemory();
+    private RecordRepository Repo => new(_db);
+
+    public void Dispose() => _db.Dispose();
+
+    private const string Monograph =
+        "=LDR  00766nam a22002534i 4500\n" +
+        "=001  1\n" +
+        "=008  260415s2017    mx            000 0 spa d\n" +
+        "=040  \\\\$aMX-MxBAC$bspa$erda\n" +
+        "=100  1\\$aMoreno, Matías$eautor\n" +
+        "=245  10$aGrandes proyectos científicos: Sincrotrón\n" +
+        "=650  \\4$aFísica nuclear$xInvestigación$xMéxico\n" +
+        "=650  \\4$aSincrotrón\n" +
+        "=852  2\\$eBúfalo\n";
+
+    private static MarcRecord Parse(string mrk) => MrkReader.Read(mrk).Records[0];
+
+    [Fact]
+    public void Save_then_load_reproduces_the_record_exactly()
+    {
+        var stored = new StoredRecord("BIB", Parse(Monograph));
+        Repo.Insert(stored);
+
+        var loaded = Repo.Load(stored.Id)!;
+
+        Assert.Equal(Monograph, MrkWriter.Write(loaded.Record));
+        Assert.Equal("BIB", loaded.Base);
+        Assert.Equal(RecordStatus.Draft, loaded.Status);
+        Assert.Equal("1", loaded.Record.ControlNumber);
+    }
+
+    [Fact]
+    public void Update_rewrites_fields_and_preserves_authority_links()
+    {
+        var stored = new StoredRecord("BIB", Parse(Monograph));
+        Repo.Insert(stored);
+
+        // Simulate Module 8: the 100 field gets linked to an authority record.
+        var authority = new StoredRecord("AUT", Parse("=LDR  00000nz  a2200000n  4500\n=001  9\n=100  1\\$aMoreno, Matías\n"));
+        Repo.Insert(authority);
+        stored.Record.FieldsWithTag("100").First().AuthLinkId = authority.Id;
+        Repo.Update(stored);
+
+        // Edit something unrelated and save again: the link must survive the rewrite.
+        stored.Record.FieldsWithTag("245").First().Subfields[0].Value += " (2a edición)";
+        Repo.Update(stored);
+
+        var loaded = Repo.Load(stored.Id)!;
+        Assert.Equal(authority.Id, loaded.Record.FieldsWithTag("100").First().AuthLinkId);
+        Assert.Contains("(2a edición)", loaded.Record.FieldsWithTag("245").First().Subfield('a'));
+        Assert.Equal(1, Repo.CountLinksTo(authority.Id));
+    }
+
+    [Fact]
+    public void Deleting_a_record_cascades_fields_and_links()
+    {
+        var stored = new StoredRecord("BIB", Parse(Monograph));
+        Repo.Insert(stored);
+        var authority = new StoredRecord("AUT", Parse("=LDR  00000nz  a2200000n  4500\n=100  1\\$aMoreno, Matías\n"));
+        Repo.Insert(authority);
+        stored.Record.FieldsWithTag("100").First().AuthLinkId = authority.Id;
+        Repo.Update(stored);
+
+        Repo.Delete(stored.Id);
+
+        Assert.Null(Repo.Load(stored.Id));
+        Assert.Equal(0, Repo.CountLinksTo(authority.Id));
+        Assert.Equal(0L, _db.Scalar("SELECT COUNT(*) FROM field WHERE record_id = " + stored.Id));
+    }
+
+    [Fact]
+    public void Duplicate_control_number_in_same_base_is_rejected()
+    {
+        Repo.Insert(new StoredRecord("BIB", Parse(Monograph)));
+        var dup = new StoredRecord("BIB", Parse(Monograph));
+
+        Assert.ThrowsAny<Microsoft.Data.Sqlite.SqliteException>(() => Repo.Insert(dup));
+    }
+
+    [Fact]
+    public void Same_control_number_in_different_bases_is_fine()
+    {
+        Repo.Insert(new StoredRecord("BIB", Parse(Monograph)));
+        var aut = new StoredRecord("AUT", Parse("=LDR  00000nz  a2200000n  4500\n=001  1\n=100  1\\$aMoreno, Matías\n"));
+        Repo.Insert(aut); // no throw
+        Assert.NotEqual(0, aut.Id);
+    }
+
+    [Fact]
+    public void Records_without_control_number_can_coexist_as_drafts()
+    {
+        var a = new StoredRecord("BIB", Parse("=LDR  00000nam a2200000 i 4500\n=245  10$aBorrador uno\n"));
+        var b = new StoredRecord("BIB", Parse("=LDR  00000nam a2200000 i 4500\n=245  10$aBorrador dos\n"));
+        Repo.Insert(a);
+        Repo.Insert(b); // partial unique index: NULL 001s don't collide
+        Assert.Equal(2, Repo.List("BIB").Count);
+    }
+
+    [Fact]
+    public void List_shows_titles_and_orders_by_control_number()
+    {
+        var r10 = Parse(Monograph.Replace("=001  1\n", "=001  10\n"));
+        var r2 = Parse(Monograph.Replace("=001  1\n", "=001  2\n").Replace("Grandes proyectos", "Otros proyectos"));
+        Repo.Insert(new StoredRecord("BIB", r10));
+        Repo.Insert(new StoredRecord("BIB", r2));
+
+        var list = Repo.List("BIB");
+        Assert.Equal(new[] { "2", "10" }, list.Select(s => s.ControlNumber).ToArray());
+        Assert.StartsWith("Otros proyectos", list[0].Title);
+    }
+
+    [Fact]
+    public void Sequence_counts_up_and_import_bump_is_respected()
+    {
+        Assert.Equal(1, Repo.NextControlNumber("BIB"));
+        Assert.Equal(2, Repo.NextControlNumber("BIB"));
+
+        Repo.BumpSequencePast("BIB", 654); // e.g. after importing a catalogue
+        Assert.Equal(655, Repo.NextControlNumber("BIB"));
+
+        Assert.Equal(1, Repo.NextControlNumber("AUT")); // bases are independent
+    }
+
+    [Fact]
+    public void Settings_roundtrip_and_overwrite()
+    {
+        Assert.Null(Repo.GetSetting("org_code"));
+        Repo.SetSetting("org_code", "MX-MxBAC");
+        Repo.SetSetting("org_code", "MX-MxBAC2");
+        Assert.Equal("MX-MxBAC2", Repo.GetSetting("org_code"));
+    }
+
+    [Fact]
+    public void Status_transitions_persist()
+    {
+        var stored = new StoredRecord("BIB", Parse(Monograph));
+        Repo.Insert(stored);
+        stored.Status = RecordStatus.Pushed;
+        Repo.Update(stored);
+
+        Assert.Equal(RecordStatus.Pushed, Repo.Load(stored.Id)!.Status);
+    }
+
+    [Fact]
+    public void Spanish_text_survives_the_database_intact()
+    {
+        var stored = new StoredRecord("BIB", Parse(Monograph));
+        Repo.Insert(stored);
+        var loaded = Repo.Load(stored.Id)!;
+
+        Assert.Equal("Física nuclear", loaded.Record.FieldsWithTag("650").First().Subfield('a'));
+        Assert.Equal("Búfalo", loaded.Record.FieldsWithTag("852").First().Subfield('e'));
+        Assert.Equal("Moreno, Matías", loaded.Record.FieldsWithTag("100").First().Subfield('a'));
+    }
+}
