@@ -63,7 +63,7 @@ Field order is significant and preserved; sorting by tag is a *command*, never a
 
 ### 3.2 Serialization (all round-trip tested)
 - **.mrk (MARCMaker/MarcEdit dialect):** `=TAG  ##$a...` lines; `\` = blank indicator; `$$` literal-dollar convention; UTF-8 **without BOM**, LF or CRLF tolerated on read, configurable on write.
-- **.mrc (ISO 2709):** leader + directory + field data with 0x1E/0x1F/0x1D separators; UTF-8 (leader/09 = `a`). Reader must tolerate slightly wrong leader lengths (recompute from directory) because real-world files lie.
+- **.mrc (ISO 2709): CUT (2026-07-27).** `.mrk` is Apud's only file format for import/export/templates; MarcEdit converts `.mrk`↔`.mrc` externally when binary MARC is needed. *(UI note for Module 6: `$a` notation is file syntax only — the editor renders subfield codes as styled cells, never dollar signs on screen.)*
 - Reader errors are **recoverable diagnostics** (line/offset + message), not exceptions — they feed the import report.
 
 ### 3.3 Fixed-field layout engine (data-driven — this is the F-menu's backbone)
