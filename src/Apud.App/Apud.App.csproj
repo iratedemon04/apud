@@ -1,0 +1,21 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Marc.Core\Marc.Core.csproj" />
+    <ProjectReference Include="..\Apud.Data\Apud.Data.csproj" />
+    <ProjectReference Include="..\Apud.Sync\Apud.Sync.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>Apud</AssemblyName>
+    <RootNamespace>Apud.App</RootNamespace>
+    <Version>0.1.0</Version>
+    <Product>Apud</Product>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+</Project>

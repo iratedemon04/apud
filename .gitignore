@@ -488,3 +488,7 @@ $RECYCLE.BIN/
 *.db-wal
 *.db-shm
 
+
+# Stock '*.app' rule above (macOS bundles) would swallow the Apud.App project folder
+!**/Apud.App/
+
