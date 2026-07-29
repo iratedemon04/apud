@@ -112,16 +112,60 @@ public class FtsSearchTests : IDisposable
     }
 
     [Fact]
+    public void Scoped_search_restricts_matching_to_one_column()
+    {
+        var rec = InsertPushed(Bib("1", "Historia de la ciencia", subject: "Física nuclear"));
+
+        Assert.Contains(rec.Id, Repo.Search("BIB", "fisica", SearchScope.Subjects));
+        Assert.Contains(rec.Id, Repo.Search("BIB", "fisica", SearchScope.All));
+        Assert.Empty(Repo.Search("BIB", "fisica", SearchScope.Title));   // it's a subject, not a title
+        Assert.Empty(Repo.Search("BIB", "historia", SearchScope.Author));
+
+        Assert.Contains(rec.Id, Repo.Search("BIB", "1", SearchScope.ControlNumber));
+        Assert.Empty(Repo.Search("BIB", "historia", SearchScope.ControlNumber));
+    }
+
+    [Fact]
+    public void Scoped_search_still_folds_accents()
+    {
+        var rec = InsertPushed(Bib("1", "Grandes proyectos", author: "Gómez Íñiguez, José"));
+        Assert.Contains(rec.Id, Repo.Search("BIB", "gomez iniguez", SearchScope.Author));
+    }
+
+    [Fact]
+    public void Match_expression_wraps_scoped_terms_in_a_column_filter()
+    {
+        Assert.Equal("\"fisica\"* \"nuclear\"*", RecordRepository.BuildMatchExpression("fisica nuclear"));
+        Assert.Equal("title : (\"fisica\"*)", RecordRepository.BuildMatchExpression("fisica", SearchScope.Title));
+        Assert.Equal("", RecordRepository.BuildMatchExpression("   ", SearchScope.Title));
+    }
+
+    [Fact]
     public void Hostile_query_text_never_throws()
     {
         InsertPushed(Bib("1", "Normal"));
 
-        // FTS5 operators, quotes, stray syntax — all neutralized by quoting.
+        // FTS5 operators, quotes, stray syntax — all neutralized by quoting,
+        // in every scope.
         foreach (var q in new[] { "AND OR NOT", "\"unbalanced", "a*b(c)", "  ", "-x {y}" })
-        {
-            var ex = Xunit.Record.Exception(() => Repo.Search("BIB", q));
-            Assert.Null(ex);
-        }
+            foreach (SearchScope scope in Enum.GetValues<SearchScope>())
+            {
+                var ex = Xunit.Record.Exception(() => Repo.Search("BIB", q, scope));
+                Assert.Null(ex);
+            }
+    }
+
+    [Fact]
+    public void Search_history_is_newest_first_and_keeps_repeats()
+    {
+        var h = new Apud.App.SearchHistory();
+        h.Add(new Apud.App.SearchHistoryEntry("fuero politico", SearchScope.All, "BIB", 0));
+        h.Add(new Apud.App.SearchHistoryEntry("fuero", SearchScope.All, "BIB", 26));
+        h.Add(new Apud.App.SearchHistoryEntry("fuero", SearchScope.All, "BIB", 26));
+
+        Assert.Equal(3, h.Entries.Count);
+        Assert.Equal("fuero", h.Entries[0].Query);
+        Assert.Equal("fuero politico", h.Entries[2].Query);
     }
 
     [Fact]

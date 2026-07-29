@@ -18,10 +18,24 @@ public sealed class MainForm : Form
     private readonly ToolStripMenuItem _bibItem;
     private readonly ToolStripMenuItem _autItem;
     private readonly ToolStripMenuItem _importItem;
+    private readonly ToolStripMenuItem _exportSelectedItem;
     private readonly SplitContainer _split;
     private readonly ListView _navList;
     private readonly Label _recordHeader;
     private readonly DataGridView _viewer;
+    private readonly ComboBox _searchScope;
+    private readonly TextBox _searchBox;
+    private readonly ListView _historyList;
+    private readonly SearchHistory _history = new();
+
+    private static readonly (string Label, SearchScope Scope)[] Scopes =
+    {
+        ("All fields", SearchScope.All),
+        ("Title", SearchScope.Title),
+        ("Author", SearchScope.Author),
+        ("Subjects", SearchScope.Subjects),
+        ("Control No.", SearchScope.ControlNumber),
+    };
 
     private ApudDatabase? _db;
     private RecordRepository? _repo;
@@ -48,6 +62,9 @@ public sealed class MainForm : Form
         file.DropDownItems.Add(new ToolStripSeparator());
         _importItem = new ToolStripMenuItem("&Import Folder...", null, (_, _) => ImportFolder());
         file.DropDownItems.Add(_importItem);
+        file.DropDownItems.Add(new ToolStripMenuItem("Export &Base...", null, (_, _) => ExportBase()));
+        _exportSelectedItem = new ToolStripMenuItem("Export &Selected...", null, (_, _) => ExportSelected());
+        file.DropDownItems.Add(_exportSelectedItem);
         file.DropDownItems.Add(new ToolStripSeparator());
         file.DropDownItems.Add(new ToolStripMenuItem("E&xit", null, (_, _) => Close())
         {
@@ -70,19 +87,69 @@ public sealed class MainForm : Form
         _menu.Items.Add(@base);
         _menu.Items.Add(help);
 
+        // ----- search bar -----
+        _searchScope = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Width = 100,
+        };
+        foreach (var (label, _) in Scopes) _searchScope.Items.Add(label);
+        _searchScope.SelectedIndex = 0;
+
+        _searchBox = new TextBox { Anchor = AnchorStyles.Left | AnchorStyles.Right };
+        _searchBox.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode == Keys.Enter) { RunSearch(); e.SuppressKeyPress = true; }
+        };
+        var searchButton = new Button { Text = "Search", Width = 58 };
+        searchButton.Click += (_, _) => RunSearch();
+        var clearButton = new Button { Text = "Clear", Width = 48 };
+        clearButton.Click += (_, _) => { _searchBox.Text = ""; RefreshNav(); };
+
+        var searchPanel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            Height = 30,
+            ColumnCount = 4,
+            Padding = new Padding(2),
+        };
+        searchPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        searchPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        searchPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        searchPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        searchPanel.Controls.Add(_searchScope, 0, 0);
+        searchPanel.Controls.Add(_searchBox, 1, 0);
+        searchPanel.Controls.Add(searchButton, 2, 0);
+        searchPanel.Controls.Add(clearButton, 3, 0);
+
         // ----- navigation pane -----
         _navList = new ListView
         {
             Dock = DockStyle.Fill,
             View = View.Details,
             FullRowSelect = true,
-            MultiSelect = false,
+            MultiSelect = true, // export-selected works off this selection
             HideSelection = false,
         };
         _navList.Columns.Add("001", 70);
         _navList.Columns.Add("Title", 250);
         _navList.Columns.Add("Status", 70);
         _navList.SelectedIndexChanged += (_, _) => ShowSelectedRecord();
+
+        // ----- session search history (in-memory only; dies with the session) -----
+        _historyList = new ListView
+        {
+            Dock = DockStyle.Bottom,
+            Height = 130,
+            View = View.Details,
+            FullRowSelect = true,
+            MultiSelect = false,
+            HideSelection = false,
+        };
+        _historyList.Columns.Add("Search history", 170);
+        _historyList.Columns.Add("Scope", 75);
+        _historyList.Columns.Add("Hits", 45, HorizontalAlignment.Right);
+        _historyList.DoubleClick += (_, _) => RerunFromHistory();
 
         // ----- viewer -----
         _recordHeader = new Label
@@ -134,6 +201,8 @@ public sealed class MainForm : Form
             FixedPanel = FixedPanel.Panel1,
         };
         _split.Panel1.Controls.Add(_navList);
+        _split.Panel1.Controls.Add(searchPanel);
+        _split.Panel1.Controls.Add(_historyList);
         _split.Panel2.Controls.Add(rightPanel);
 
         // ----- message bar -----
@@ -267,6 +336,107 @@ public sealed class MainForm : Form
         SetMessage($"{_base}: {list.Count} record{(list.Count == 1 ? "" : "s")}.");
     }
 
+    // ---------- search ----------
+
+    private void RunSearch()
+    {
+        if (_repo is null)
+        {
+            SetMessage("Open a catalogue first.");
+            return;
+        }
+        string query = _searchBox.Text.Trim();
+        if (query.Length == 0) return;
+
+        var scope = Scopes[_searchScope.SelectedIndex].Scope;
+        var ids = _repo.Search(_base, query, scope);
+
+        _history.Add(new SearchHistoryEntry(query, scope, _base, ids.Count));
+        RefreshHistoryList();
+
+        var byId = _repo.List(_base).ToDictionary(s => s.Id);
+        _navList.Items.Clear();
+        ClearViewer();
+        _navList.BeginUpdate();
+        foreach (long id in ids) // rank order, best first
+        {
+            if (!byId.TryGetValue(id, out var s)) continue;
+            var item = new ListViewItem(s.ControlNumber ?? "");
+            item.SubItems.Add(s.Title);
+            item.SubItems.Add(s.Status == RecordStatus.Pushed ? "pushed" : "draft");
+            item.Tag = s.Id;
+            _navList.Items.Add(item);
+        }
+        _navList.EndUpdate();
+        SetMessage($"{ids.Count} hit(s) for \"{query}\" in {_base}. Clear returns to the full list.");
+    }
+
+    private void RefreshHistoryList()
+    {
+        _historyList.BeginUpdate();
+        _historyList.Items.Clear();
+        foreach (var e in _history.Entries)
+        {
+            var item = new ListViewItem(e.Query);
+            item.SubItems.Add(Scopes.First(s => s.Scope == e.Scope).Label);
+            item.SubItems.Add(e.Hits.ToString());
+            item.Tag = e;
+            _historyList.Items.Add(item);
+        }
+        _historyList.EndUpdate();
+    }
+
+    private void RerunFromHistory()
+    {
+        if (_historyList.SelectedItems.Count == 0) return;
+        var e = (SearchHistoryEntry)_historyList.SelectedItems[0].Tag!;
+        if (e.Base != _base) SwitchBase(e.Base);
+        _searchBox.Text = e.Query;
+        _searchScope.SelectedIndex = Array.FindIndex(Scopes, s => s.Scope == e.Scope);
+        RunSearch();
+    }
+
+    // ---------- export ----------
+
+    private void ExportBase()
+    {
+        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+        int count = _repo.List(_base).Count;
+        if (count == 0) { SetMessage($"{_base} is empty — nothing to export."); return; }
+        ExportTo($"{_base}.mrk", path =>
+        {
+            new ExportEngine(_repo).ExportBaseToFile(_base, path);
+            return count;
+        });
+    }
+
+    private void ExportSelected()
+    {
+        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+        var ids = _navList.SelectedItems.Cast<ListViewItem>().Select(i => (long)i.Tag!).ToList();
+        if (ids.Count == 0) { SetMessage("Select one or more records in the list first."); return; }
+        ExportTo($"{_base}-selection.mrk", path =>
+        {
+            new ExportEngine(_repo!).ExportToFile(ids, path);
+            return ids.Count;
+        });
+    }
+
+    private void ExportTo(string suggestedName, Func<string, int> write)
+    {
+        using var dialog = new SaveFileDialog
+        {
+            Title = "Export",
+            InitialDirectory = SuggestedFolder(),
+            FileName = suggestedName,
+            Filter = "MARC text (*.mrk)|*.mrk",
+            OverwritePrompt = true,
+        };
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        int count = write(dialog.FileName);
+        SetMessage($"Exported {count} record(s) to {dialog.FileName}.");
+    }
+
     private void ShowSelectedRecord()
     {
         if (_repo is null || _navList.SelectedItems.Count == 0) return;
@@ -315,49 +485,22 @@ public sealed class MainForm : Form
             return;
         }
 
-        // Plain import (5b): any error aborts; the full report grid with
-        // record-level choices is the 5c wizard.
-        if (!report.CanCommitAsPushed)
+        using var wizard = new ImportWizardForm(dialog.SelectedPath, report);
+        if (wizard.ShowDialog(this) != DialogResult.OK) return; // nothing committed
+
+        try
         {
-            MessageBox.Show(this, BuildErrorText(report), "Import blocked",
-                MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
+            var result = engine.Commit(plan, wizard.SelectedMode);
+            RefreshNav();
+            SetMessage($"Imported {result.RecordsImported} record(s) — BIB {result.BibCount}, AUT {result.AutCount}.");
         }
-
-        int warnings = report.Files.Sum(f => f.Diagnostics.Count);
-        string summary =
-            $"{report.Files.Count} file(s), {report.TotalRecords} record(s), " +
-            $"{warnings} warning(s), no errors.\n\n" +
-            "Yes — import as PUSHED (trusted migration; records enter search)\n" +
-            "No — import as DRAFTS (records stay out of search until pushed)";
-        var choice = MessageBox.Show(this, summary, "Import Folder",
-            MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
-        if (choice == DialogResult.Cancel) return;
-
-        var result = engine.Commit(plan,
-            choice == DialogResult.Yes ? ImportMode.AsPushed : ImportMode.AsDrafts);
-
-        RefreshNav();
-        SetMessage($"Imported {result.RecordsImported} record(s) — BIB {result.BibCount}, AUT {result.AutCount}.");
-    }
-
-    private static string BuildErrorText(ImportReport report)
-    {
-        var lines = new List<string> { "The import was NOT run. Problems found:", "" };
-        foreach (var e in report.RunErrors)
-            lines.Add("• " + e);
-        foreach (var f in report.Files.Where(f => f.Diagnostics.Count > 0))
+        catch (Microsoft.Data.Sqlite.SqliteException e)
         {
-            lines.Add(Path.GetFileName(f.FilePath) + ":");
-            lines.AddRange(f.Diagnostics.Select(d => "   " + d));
+            // e.g. a record inserted between Analyze and Commit now collides;
+            // the transaction rolled back — the catalogue is untouched.
+            MessageBox.Show(this, $"Import failed and nothing was committed.\n\n{e.Message}",
+                "Import Folder", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
-        if (lines.Count > 32)
-        {
-            int extra = lines.Count - 32;
-            lines = lines.Take(32).ToList();
-            lines.Add($"... and {extra} more line(s).");
-        }
-        return string.Join("\n", lines);
     }
 
     private void SetMessage(string text) => _messageLabel.Text = text;

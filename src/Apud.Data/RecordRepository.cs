@@ -236,10 +236,11 @@ public sealed class RecordRepository
     /// Ranked full-text search over the pushed records of one base; returns record
     /// ids, best match first. The query is end-user text ("fisica nuclear"), turned
     /// into a prefix-match on every word; accents don't matter (remove_diacritics 2).
+    /// A scope restricts matching to one indexed column (title/author/subjects/001).
     /// </summary>
-    public List<long> Search(string @base, string query, int limit = 200)
+    public List<long> Search(string @base, string query, SearchScope scope = SearchScope.All, int limit = 200)
     {
-        string match = BuildMatchExpression(query);
+        string match = BuildMatchExpression(query, scope);
         var ids = new List<long>();
         if (match.Length == 0) return ids;
 
@@ -262,11 +263,24 @@ public sealed class RecordRepository
     /// User text → FTS5 query: each whitespace-separated word becomes a quoted
     /// prefix term ("fisica"*), joined by implicit AND. Quoting neutralizes FTS5
     /// operators, so arbitrary typed text can never produce a syntax error.
+    /// A non-All scope wraps the terms in an FTS5 column filter.
     /// </summary>
-    internal static string BuildMatchExpression(string query) =>
-        string.Join(" ",
+    internal static string BuildMatchExpression(string query, SearchScope scope = SearchScope.All)
+    {
+        string terms = string.Join(" ",
             query.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
                  .Select(w => "\"" + w.Replace("\"", "\"\"") + "\"*"));
+        if (terms.Length == 0 || scope == SearchScope.All) return terms;
+
+        string column = scope switch
+        {
+            SearchScope.Title => "title",
+            SearchScope.Author => "author",
+            SearchScope.Subjects => "subjects",
+            _ => "control_number",
+        };
+        return $"{column} : ({terms})";
+    }
 
     /// <summary>Ids of BIB fields linked to the given authority record (ripple/refuse-delete support).</summary>
     public long CountLinksTo(long authRecordId) =>
