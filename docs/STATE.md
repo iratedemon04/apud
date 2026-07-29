@@ -3,6 +3,7 @@
 
 ## Now
 - **START HERE NEXT SESSION: Module 5b — Catalog on screen. User gates the transition; wait for GO.**
+- **2026-07-28: user supplied 5 screenshots of his real ALEPH v24 workflow (editor, 008 dialog, search, import, base switching) → studied and distilled into `docs/ALEPH-WORKFLOW.md`. UI modules 5b–8 must follow that reference (subfield-per-row layout, header bar, menu-based base switch, search history grid, F8 dialog shape).**
 - **Module 5b:** catalog file handling (default `Documents\Apud\catalog.db`, New/Open, remember last path), navigation pane (BIB/AUT switch, record list: 001/title/status), read-only viewer with ‡a subfield display (NO dollar signs on screen), plain File→Import Folder calling the 5a engine. Acceptance: he imports his catalog himself and browses it.
 - **Module 5c (after 5b):** search box wired to FTS, full import wizard (report grid, pushed/drafts choice, cancel = nothing committed), Export UI. Acceptance: he searches in Spanish and re-imports via wizard.
 - Environment note: .NET 8 SDK 8.0.423 installed via winget (machine had runtime only). Git identity: repo-local iratedemon04 <iratedemon04@gmail.com>; history rewritten 2026-07-27 to purge old-account attribution (ranakamikaze), force-pushed by user; contributors list verified clean via API (graph cache may lag).
