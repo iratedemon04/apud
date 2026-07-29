@@ -1,7 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <!-- net8.0-windows + UseWindowsForms so the presentation logic in Apud.App
+         (settings, tag names, record view model) is testable here. -->
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 
@@ -24,6 +27,7 @@
     <ProjectReference Include="..\..\src\Marc.Core\Marc.Core.csproj" />
     <ProjectReference Include="..\..\src\Apud.Data\Apud.Data.csproj" />
     <ProjectReference Include="..\..\src\Apud.Sync\Apud.Sync.csproj" />
+    <ProjectReference Include="..\..\src\Apud.App\Apud.App.csproj" />
   </ItemGroup>
 
 </Project>
