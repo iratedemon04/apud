@@ -21,12 +21,17 @@ public sealed class RecordRepository
 
     // ---------- save ----------
 
-    /// <summary>Inserts a new record as a draft. Sets Id/timestamps on the instance.</summary>
+    /// <summary>Inserts a new record. Sets Id/timestamps on the instance.</summary>
     public void Insert(StoredRecord rec)
     {
-        var now = DateTime.UtcNow;
         using var tx = _db.Connection.BeginTransaction();
+        InsertCore(tx, rec, DateTime.UtcNow);
+        tx.Commit();
+    }
 
+    /// <summary>Insert within a caller-owned transaction (import runs are all-or-nothing).</summary>
+    internal void InsertCore(SqliteTransaction tx, StoredRecord rec, DateTime now)
+    {
         using (var cmd = _db.Connection.CreateCommand())
         {
             cmd.Transaction = tx;
@@ -44,7 +49,8 @@ public sealed class RecordRepository
         }
 
         WriteFields(tx, rec);
-        tx.Commit();
+        if (rec.Status == RecordStatus.Pushed)
+            FtsIndexer.Add(_db.Connection, tx, rec.Id);
 
         rec.CreatedUtc = now;
         rec.UpdatedUtc = now;
@@ -59,6 +65,11 @@ public sealed class RecordRepository
         if (rec.Id == 0) throw new InvalidOperationException("Record was never inserted.");
         var now = DateTime.UtcNow;
         using var tx = _db.Connection.BeginTransaction();
+
+        // Un-index BEFORE the field rows are rewritten: the contentless FTS delete
+        // needs the values exactly as they were indexed.
+        if (WasPushed(tx, rec.Id))
+            FtsIndexer.Remove(_db.Connection, tx, rec.Id);
 
         using (var cmd = _db.Connection.CreateCommand())
         {
@@ -78,9 +89,20 @@ public sealed class RecordRepository
 
         Execute(tx, "DELETE FROM field WHERE record_id = $id", ("$id", rec.Id)); // links cascade
         WriteFields(tx, rec);
+        if (rec.Status == RecordStatus.Pushed)
+            FtsIndexer.Add(_db.Connection, tx, rec.Id);
         tx.Commit();
 
         rec.UpdatedUtc = now;
+    }
+
+    private bool WasPushed(SqliteTransaction tx, long id)
+    {
+        using var cmd = _db.Connection.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "SELECT status FROM record WHERE id = $id";
+        cmd.Parameters.AddWithValue("$id", id);
+        return cmd.ExecuteScalar() as string == "pushed";
     }
 
     private void WriteFields(SqliteTransaction tx, StoredRecord rec)
@@ -199,8 +221,52 @@ public sealed class RecordRepository
         return list;
     }
 
-    public void Delete(long id) =>
-        Execute(null, "DELETE FROM record WHERE id = $id", ("$id", id));
+    public void Delete(long id)
+    {
+        using var tx = _db.Connection.BeginTransaction();
+        if (WasPushed(tx, id))
+            FtsIndexer.Remove(_db.Connection, tx, id); // while field rows still exist
+        Execute(tx, "DELETE FROM record WHERE id = $id", ("$id", id));
+        tx.Commit();
+    }
+
+    // ---------- search ----------
+
+    /// <summary>
+    /// Ranked full-text search over the pushed records of one base; returns record
+    /// ids, best match first. The query is end-user text ("fisica nuclear"), turned
+    /// into a prefix-match on every word; accents don't matter (remove_diacritics 2).
+    /// </summary>
+    public List<long> Search(string @base, string query, int limit = 200)
+    {
+        string match = BuildMatchExpression(query);
+        var ids = new List<long>();
+        if (match.Length == 0) return ids;
+
+        using var cmd = _db.Connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT f.rowid FROM record_fts f
+            JOIN record r ON r.id = f.rowid
+            WHERE record_fts MATCH $match AND r.base = $base
+            ORDER BY rank LIMIT $limit;
+            """;
+        cmd.Parameters.AddWithValue("$match", match);
+        cmd.Parameters.AddWithValue("$base", @base);
+        cmd.Parameters.AddWithValue("$limit", limit);
+        using var r = cmd.ExecuteReader();
+        while (r.Read()) ids.Add(r.GetInt64(0));
+        return ids;
+    }
+
+    /// <summary>
+    /// User text → FTS5 query: each whitespace-separated word becomes a quoted
+    /// prefix term ("fisica"*), joined by implicit AND. Quoting neutralizes FTS5
+    /// operators, so arbitrary typed text can never produce a syntax error.
+    /// </summary>
+    internal static string BuildMatchExpression(string query) =>
+        string.Join(" ",
+            query.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+                 .Select(w => "\"" + w.Replace("\"", "\"\"") + "\"*"));
 
     /// <summary>Ids of BIB fields linked to the given authority record (ripple/refuse-delete support).</summary>
     public long CountLinksTo(long authRecordId) =>
@@ -229,13 +295,30 @@ public sealed class RecordRepository
     }
 
     /// <summary>Ensures the sequence for a base will hand out numbers above <paramref name="highestSeen"/>.</summary>
-    public void BumpSequencePast(string @base, long highestSeen)
+    public void BumpSequencePast(string @base, long highestSeen) =>
+        BumpSequencePast(null, @base, highestSeen);
+
+    internal void BumpSequencePast(SqliteTransaction? tx, string @base, long highestSeen)
     {
-        Execute(null, """
+        Execute(tx, """
             INSERT INTO sequence (base, next_value) VALUES ($base, $v)
             ON CONFLICT(base) DO UPDATE SET next_value = MAX(next_value, $v);
             """, ("$base", @base), ("$v", highestSeen + 1));
     }
+
+    /// <summary>All 001s currently present in a base (import duplicate check).</summary>
+    internal HashSet<string> ExistingControlNumbers(string @base)
+    {
+        var set = new HashSet<string>();
+        using var cmd = _db.Connection.CreateCommand();
+        cmd.CommandText = "SELECT control_number FROM record WHERE base = $b AND control_number IS NOT NULL";
+        cmd.Parameters.AddWithValue("$b", @base);
+        using var r = cmd.ExecuteReader();
+        while (r.Read()) set.Add(r.GetString(0));
+        return set;
+    }
+
+    internal SqliteTransaction BeginTransaction() => _db.Connection.BeginTransaction();
 
     public string? GetSetting(string key)
     {

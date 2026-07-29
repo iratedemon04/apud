@@ -14,7 +14,7 @@ namespace Apud.Data;
 /// </summary>
 public sealed class ApudDatabase : IDisposable
 {
-    public const int SchemaVersion = 1;
+    public const int SchemaVersion = 2;
 
     public SqliteConnection Connection { get; }
 
@@ -41,19 +41,33 @@ public sealed class ApudDatabase : IDisposable
     {
         long version = (long)(Scalar("PRAGMA user_version;") ?? 0L);
 
-        if (version == 0)
-        {
-            CreateSchemaV1();
-            Execute($"PRAGMA user_version = {SchemaVersion};");
-            return;
-        }
-
         if (version > SchemaVersion)
             throw new InvalidOperationException(
                 $"This catalogue was created by a newer Apud (schema v{version}; this Apud knows v{SchemaVersion}).");
 
-        // version == SchemaVersion: nothing to do. Future upgrades branch here:
-        // if (version == 1) { ...upgrade to 2...; version = 2; }
+        if (version == 0) { CreateSchemaV1(); version = 1; }
+        if (version == 1) { UpgradeV1ToV2(); version = 2; }
+
+        Execute($"PRAGMA user_version = {SchemaVersion};");
+    }
+
+    /// <summary>
+    /// v2 (Module 5a): record_fts gains the accent-folding tokenizer
+    /// (unicode61 remove_diacritics 2) so "fisica" finds "Física". A contentless
+    /// FTS table can't be altered, so it is dropped, recreated, and repopulated
+    /// from the pushed records.
+    /// </summary>
+    private void UpgradeV1ToV2()
+    {
+        Execute("""
+            DROP TABLE record_fts;
+            CREATE VIRTUAL TABLE record_fts USING fts5(
+              control_number, title, author, subjects, anytext,
+              content='',
+              tokenize='unicode61 remove_diacritics 2'
+            );
+            """);
+        FtsIndexer.Rebuild(Connection);
     }
 
     private void CreateSchemaV1()
