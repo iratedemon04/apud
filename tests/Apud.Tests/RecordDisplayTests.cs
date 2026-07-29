@@ -89,32 +89,3 @@ public class RecordDisplayTests
             RecordDisplay.HeaderText("AUT", aut.ControlNumber, aut));
     }
 }
-
-public class AppSettingsTests : IDisposable
-{
-    private readonly string _path = Path.Combine(
-        Path.GetTempPath(), $"apud-settings-{Guid.NewGuid():N}", "settings.json");
-
-    public void Dispose()
-    {
-        var dir = Path.GetDirectoryName(_path)!;
-        if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
-    }
-
-    [Fact]
-    public void Settings_roundtrip_creating_the_folder()
-    {
-        new AppSettings { LastCatalogPath = @"C:\somewhere\catalog.db" }.Save(_path);
-        Assert.Equal(@"C:\somewhere\catalog.db", AppSettings.Load(_path).LastCatalogPath);
-    }
-
-    [Fact]
-    public void Missing_or_corrupt_settings_yield_defaults()
-    {
-        Assert.Null(AppSettings.Load(_path).LastCatalogPath);
-
-        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        File.WriteAllText(_path, "{not json");
-        Assert.Null(AppSettings.Load(_path).LastCatalogPath);
-    }
-}

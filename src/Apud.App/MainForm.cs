@@ -23,8 +23,6 @@ public sealed class MainForm : Form
     private readonly Label _recordHeader;
     private readonly DataGridView _viewer;
 
-    private readonly AppSettings _settings = AppSettings.Load(AppSettings.DefaultFilePath);
-
     private ApudDatabase? _db;
     private RecordRepository? _repo;
     private string _base = "BIB";
@@ -148,7 +146,11 @@ public sealed class MainForm : Form
         Controls.Add(_menu);
         MainMenuStrip = _menu;
 
-        Load += (_, _) => OpenLastCatalog();
+        // Deliberately dumb (user decision, 2026-07-28): the app never reconnects
+        // to a previous catalogue, remembers nothing between sessions, and creates
+        // nothing on its own — cataloguers must consciously choose the database
+        // every session, exactly like Aleph's Connect to...
+        Load += (_, _) => SetMessage("No catalogue open — File → New Catalogue or Open Catalogue.");
         FormClosed += (_, _) => _db?.Dispose();
     }
 
@@ -166,21 +168,20 @@ public sealed class MainForm : Form
 
     // ---------- catalogue lifecycle ----------
 
-    private void OpenLastCatalog()
+    /// <summary>Documents\Apud if the user has made it, else Documents. Never created by us.</summary>
+    private static string SuggestedFolder()
     {
-        if (_settings.LastCatalogPath is string last && File.Exists(last))
-            OpenCatalog(last);
-        else
-            SetMessage("No catalogue open — File → New Catalogue or Open Catalogue.");
+        string documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        string apud = Path.Combine(documents, "Apud");
+        return Directory.Exists(apud) ? apud : documents;
     }
 
     private void NewCatalog()
     {
-        Directory.CreateDirectory(AppSettings.DefaultCatalogFolder);
         using var dialog = new SaveFileDialog
         {
             Title = "New Catalogue",
-            InitialDirectory = AppSettings.DefaultCatalogFolder,
+            InitialDirectory = SuggestedFolder(),
             FileName = "catalog.db",
             Filter = "Apud catalogue (*.db)|*.db",
             OverwritePrompt = true,
@@ -190,7 +191,7 @@ public sealed class MainForm : Form
         // The dialog already asked about overwriting; a stale file must not be
         // silently opened as an existing catalogue.
         if (File.Exists(dialog.FileName)) File.Delete(dialog.FileName);
-        OpenCatalog(dialog.FileName);
+        OpenCatalog(dialog.FileName, createNew: true);
     }
 
     private void OpenCatalogDialog()
@@ -198,17 +199,24 @@ public sealed class MainForm : Form
         using var dialog = new OpenFileDialog
         {
             Title = "Open Catalogue",
-            InitialDirectory = Directory.Exists(AppSettings.DefaultCatalogFolder)
-                ? AppSettings.DefaultCatalogFolder
-                : Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            InitialDirectory = SuggestedFolder(),
             Filter = "Apud catalogue (*.db)|*.db|All files (*.*)|*.*",
         };
         if (dialog.ShowDialog(this) == DialogResult.OK)
             OpenCatalog(dialog.FileName);
     }
 
-    private void OpenCatalog(string path)
+    private void OpenCatalog(string path, bool createNew = false)
     {
+        // Opening never creates: SQLite would happily conjure an empty database
+        // at a mistyped path, and this software creates nothing on its own.
+        if (!createNew && !File.Exists(path))
+        {
+            MessageBox.Show(this, $"There is no catalogue at:\n{path}", "Cannot open catalogue",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
         ApudDatabase db;
         try
         {
@@ -226,8 +234,6 @@ public sealed class MainForm : Form
         _repo = new RecordRepository(db);
 
         Text = $"Apud — {path}";
-        _settings.LastCatalogPath = path;
-        _settings.Save(AppSettings.DefaultFilePath);
         RefreshNav();
     }
 
