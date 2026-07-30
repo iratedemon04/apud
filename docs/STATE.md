@@ -2,7 +2,8 @@
 *(Session-survival file. THIS repo copy is authoritative; a fresh session reading this + docs/PLAN.md can continue without re-explaining. Update at end of every session and module close.)*
 
 ## Now
-- **Module 5c BUILT (2026-07-28), awaiting the user's test drive (acceptance: he searches in Spanish and re-imports via the wizard). If he reports issues, fix within 5c; when he says move on → Module 6 (editor+keymap+templates; his §6.2 keymap red-pen is due at its START).**
+- **START HERE NEXT SESSION: Module 6 — Editor + keymap + templates. BLOCKED ON USER INPUT: his §6.2 keymap red-pen (docs/PLAN.md) is due at the START of 6 — collect it before drafting the step list.**
+- Module 5c ACCEPTED by user 2026-07-28 ("this looks great") after the layout rework.
 - **5c layout REWORKED after user correction (2026-07-28):** search screen (base+scope+query form, results, history) lives in the MAIN area with a Search/Record view toggle; the SIDEBAR is the open-records collection — double-click/Enter on a result adds the record (any base, no duplicates, Remove/Remove All/Del to close); List All button = explicit whole-base listing; nav-list-replacement design scrapped. ALEPH-WORKFLOW.md search section corrected.
 - Module 5b ACCEPTED by user 2026-07-28 ("works beautifully") after the no-smart-behavior fix.
 - 2026-07-28: user supplied 5 screenshots of his real ALEPH v24 workflow → distilled into `docs/ALEPH-WORKFLOW.md`. UI modules 5b–8 must follow that reference (subfield-per-row layout, header bar, menu-based base switch, search history grid, F8 dialog shape).
@@ -11,7 +12,7 @@
 - Environment note: .NET 8 SDK 8.0.423 installed via winget (machine had runtime only). Git identity: repo-local iratedemon04 <iratedemon04@gmail.com>; history rewritten 2026-07-27 to purge old-account attribution (ranakamikaze), force-pushed by user; contributors list verified clean via API (graph cache may lag).
 
 ## Module sequence (user gates every transition — build ONLY current module)
-1. Scaffold ✔ · 2. MARC model + .mrk ✔ · 3. ~~.mrc~~ CUT · 4. Database ✔ · 5a. Import/Export/FTS engines ✔ · 5b. Catalog on screen ✔ · **5c. Search + wizard + export ✔ built, awaiting user acceptance** · 6. Editor+keymap+templates (his §6.2 keymap red-pen due at START of 6) · 7. F8 fixed-field dialogs · 8. AUT+F3 · 9. Ctrl+L pipeline · 10. Settings/help (i18n cut → v2/v3) · 11. Sync (SFTP) · 12. Distribution (installer, manual, release tag)
+1. Scaffold ✔ · 2. MARC model + .mrk ✔ · 3. ~~.mrc~~ CUT · 4. Database ✔ · 5a. Import/Export/FTS engines ✔ · 5b. Catalog on screen ✔ · 5c. Search + wizard + export ✔ · **6. Editor+keymap+templates ← NEXT (awaiting §6.2 red-pen)** (his §6.2 keymap red-pen due at START of 6) · 7. F8 fixed-field dialogs · 8. AUT+F3 · 9. Ctrl+L pipeline · 10. Settings/help (i18n cut → v2/v3) · 11. Sync (SFTP) · 12. Distribution (installer, manual, release tag)
 
 ## Done
 - **Module 5c — Search + import wizard + export UI** (2026-07-28, pending user acceptance): SearchScope enum (All/Title/Author/Subjects/ControlNumber) → FTS5 column filters in BuildMatchExpression (`title : ("x"*)`; hostile input safe in every scope); search bar over nav pane (scope dropdown + box; Enter or Search; results replace nav list in rank order; Clear → full list; drafts invisible by construction); session SearchHistory (newest first, repeats kept, IN-MEMORY ONLY per no-smart rule; grid bottom-left: query/scope/hits; double-click re-runs incl. base switch); ImportWizardForm replaces 5b MessageBox flow (per-file grid w/ warning/error counts + color, click→line-numbered diagnostics, run errors in red, PUSHED/DRAFTS radios w/ rules stated, Import enabled only when chosen mode legal, defaults to strictest legal, Cancel commits nothing; commit-time SqliteException → rolled-back + friendly dialog); Export UI: File→Export Base... / Export Selected... (nav is multi-select now; SaveFileDialog, user names path, suggested `BIB.mrk`/`BIB-selection.mrk`, overwrite prompt). Cross-sets deferred (DEFERRED.md). +4 tests (64 green). Published + smoke-launched.
@@ -39,7 +40,8 @@
 - Editor "spike" (throwaway UI prototype) proposed by Claude, REJECTED after discussion: user's option-value argument — core layers (Marc.Core/Apud.Data) are UI-independent, so a Module-6 UI surprise costs only thin-layer rework, not weeks; insurance not worth premium. Original 12-module sequence stands. Guiding frame: zero invention, 1960s solved problem, assembly not research; all durable logic lives below Apud.App.
 
 ## Next from user
-- **Test-drive 5c: search in Spanish (scopes, history), re-import via the wizard, export a .mrk; report issues or say move on (→ 6, where his §6.2 keymap red-pen is due).**
+- **§6.2 keymap red-pen (docs/PLAN.md) — Module 6 starts with it.**
+- GO on the Module 6 step list once the red-pen is in.
 - §6.2 keymap red-pen (docs/PLAN.md) — due at start of Module 6.
 
 ## Standing working rules (fresh-session refresher)
