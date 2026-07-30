@@ -171,8 +171,12 @@ Everything else "doesn't matter much" (his words) — remaining defaults are Cla
 
 **→ Hotkeys must be user-changeable (keymap.json). This is what actually matters to him. First-class feature, not an afterthought.**
 
-Secondary defaults (kept from the old proposal, all rebindable): F5/F6 new field (pick list / direct tag), F7 new subfield, Ctrl+F5/Ctrl+F7 delete field/subfield, Ctrl+S save draft, Ctrl+W validate-only, Ctrl+T save as template, F1 field help, F2 search.
+Secondary defaults (all rebindable): F6 new field, F7 new subfield, Ctrl+F5/Ctrl+F7 delete field/subfield, Ctrl+S save draft, Ctrl+W validate-only, Ctrl+T save as template, F1 field help, F2 search.
 Catalogue commands (New/Open Catalogue) LOSE their Ctrl+N/Ctrl+O shortcuts — menu-only — so record commands own the keyboard.
+
+**Editor dumbness rules (user, 2026-07-28):**
+- **New field = a BLANK field.** The cataloguer types whatever tag they want — 000, 999, 650, anything. No pick-lists, no tag validation at entry, no filtering. (The old F5 filtered pick-list is CUT; judging tags is the validator's job, Module 9.) 
+- **The editor NEVER reorders fields.** Fields get ordered at VALIDATION time (Ctrl+L/Ctrl+W, Module 9), before push — a STABLE sort by tag: repeated tags (three 650s, two 500s, two 900s...) keep exactly the order the cataloguer wrote them in. First subject vs. second subject is real cataloguing information. No manual sort commands needed (old F11/F12 CUT).
 
 ### 6.3 Authority browse behavior (F3)
 1. Caret in a controlled field (configurable set; default 100/110/111/130/240/6XX/700/710/711/730/800/810/811/830 for BIB) → F3 opens the browse list **positioned alphabetically at the current field text** (normalized comparison).

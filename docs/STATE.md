@@ -2,7 +2,18 @@
 *(Session-survival file. THIS repo copy is authoritative; a fresh session reading this + docs/PLAN.md can continue without re-explaining. Update at end of every session and module close.)*
 
 ## Now
-- **START HERE NEXT SESSION: Module 6 — Editor + keymap + templates. §6.2 red-pen RECEIVED 2026-07-28 and written into PLAN.md §6.2 (Ctrl+F3 fixed-field editor, Ctrl+N context new/copy, Ctrl+L push [assumed — confirm], Ctrl+F4 validate-field/link-heading; rest = Claude's choice; HARD REQUIREMENT: user-rebindable hotkeys via keymap.json). Step list drafted and presented — awaiting his GO.**
+- **START HERE NEXT SESSION: Module 6 — Editor + keymap + templates. Step list below was presented; user amended it (amendments already folded in). CONFIRM GO, then build.**
+- **§6.2 keymap red-pen received (in PLAN.md §6.2):** Ctrl+F3 on LDR/008 = position-by-position editor (Module 7); Ctrl+N context-sensitive (no record → new; in a record → copy as draft, 001 cleared); Ctrl+L = validate+push (ASSUMED from "ctr for pushing" — confirm with him); Ctrl+F4 = validate field / on heading: AUT popup positioned alphabetically, Enter links both records (Modules 8–9). Defaults don't matter much — **the hard requirement is user-rebindable hotkeys (keymap.json). That's the feature.**
+- **Module 6 step list (presented 2026-07-28, amendments folded in):**
+  1. Command table: every editor action a command object (id/name/context/handler); menus render FROM the table from now on.
+  2. Keymap engine (the centerpiece): keymap.json next to exe, `"command-id": "Ctrl+F3"`, comment header documenting syntax; missing file/entry → built-in default; bad binding → report line, fall back, never crash; context-scoped (editor/search/global); headless tests.
+  3. Editor grid: Record view becomes editable in place (subfield values, codes, indicators, tags); **new field = BLANK field, cataloguer types ANY tag (000/999/whatever) — no pick-list, no entry-time validation (dumb software)**; F6 new field, F7 new subfield, Ctrl+F5/Ctrl+F7 delete; **editor NEVER reorders fields — ordering happens at validation (Module 9) as a STABLE sort by tag: repeated tags (650s, 500s, 900s) keep the cataloguer's written order (subject order is real information)**; dirty marker (*) in header bar.
+  4. Ctrl+N context behavior (new-from-template picker / copy-as-draft with 001 cleared, sequence fills at push).
+  5. Ctrl+S save draft via existing repo (drafts stay out of search per 5a).
+  6. Templates: .mrk skeletons in templates\ beside exe; Ctrl+T save-as-template (user names file); ship 3 starters (monograph, serial, authority).
+  7. Stubs wired not built: Ctrl+F3 → "arrives in Module 7", Ctrl+F4 → M8, Ctrl+L → M9 (message bar); keys rebindable from day one.
+  8. Tests: keymap parse/fallback/conflicts, dispatch, editor ops on the model, Ctrl+N copy semantics, template round-trip.
+  9. Publish + his test drive (edit, save draft, new-from-template, REBIND A KEY and feel it work) → STATE, commit, push.
 - Module 5c ACCEPTED by user 2026-07-28 ("this looks great") after the layout rework.
 - **5c layout REWORKED after user correction (2026-07-28):** search screen (base+scope+query form, results, history) lives in the MAIN area with a Search/Record view toggle; the SIDEBAR is the open-records collection — double-click/Enter on a result adds the record (any base, no duplicates, Remove/Remove All/Del to close); List All button = explicit whole-base listing; nav-list-replacement design scrapped. ALEPH-WORKFLOW.md search section corrected.
 - Module 5b ACCEPTED by user 2026-07-28 ("works beautifully") after the no-smart-behavior fix.
@@ -24,6 +35,7 @@
 - Full technical plan: `docs/PLAN.md` (architecture, schema, keymap proposal, validation pipeline, milestones). Self-validated once; known verify-item: MarcEdit literal-$ convention (check in Module 2).
 
 ## Decisions
+- **Editor dumbness (user, 2026-07-28):** new field = blank, any tag typed freely (judging tags is Module 9's job); editor never reorders fields — validation (Ctrl+L/W) does, as a stable sort by tag preserving the written order of repeated tags (650/500/900 order = cataloguing information). Old F5 pick-list and F11/F12 sort commands CUT. Full text in PLAN.md §6.2.
 - **NO SMART BEHAVIOR (user, 2026-07-28, applies to ALL modules):** Aleph isn't smart and neither is Apud. Never reconnect to a previous catalogue (cataloguers open the wrong base out of habit — every session starts disconnected, choosing the database is a conscious act); never auto-create anything (no folders, no databases — SQLite's create-on-open is guarded off; File→New is the only creator, explicitly); no remembered state between sessions (AppSettings store deleted). Convenience features must be proposed and approved, never assumed.
 - **English-only for this whole version (user, 2026-07-28):** all UI text in English; Spanish/localization arrives in v2 or v3, well after first release. Module 10 loses its i18n item (settings/help remain).
 - Name: **Apud**. Repo root `C:\Users\ACV\Projects\Apud\`; projects Marc.Core / Apud.Data / Apud.Sync / Apud.App / Apud.Tests.
@@ -40,7 +52,7 @@
 - Editor "spike" (throwaway UI prototype) proposed by Claude, REJECTED after discussion: user's option-value argument — core layers (Marc.Core/Apud.Data) are UI-independent, so a Module-6 UI surprise costs only thin-layer rework, not weeks; insurance not worth premium. Original 12-module sequence stands. Guiding frame: zero invention, 1960s solved problem, assembly not research; all durable logic lives below Apud.App.
 
 ## Next from user
-- **GO on the Module 6 step list (red-pen is in; confirm Ctrl+L-for-push assumption while at it).**
+- **GO on Module 6 (step list above, amendments folded in) — he switched to a fresh session for this; confirm the Ctrl+L-for-push assumption while at it.**
 - §6.2 keymap red-pen (docs/PLAN.md) — due at start of Module 6.
 
 ## Standing working rules (fresh-session refresher)
