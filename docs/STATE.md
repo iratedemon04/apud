@@ -3,6 +3,7 @@
 
 ## Now
 - **Module 5c BUILT (2026-07-28), awaiting the user's test drive (acceptance: he searches in Spanish and re-imports via the wizard). If he reports issues, fix within 5c; when he says move on → Module 6 (editor+keymap+templates; his §6.2 keymap red-pen is due at its START).**
+- **5c layout REWORKED after user correction (2026-07-28):** search screen (base+scope+query form, results, history) lives in the MAIN area with a Search/Record view toggle; the SIDEBAR is the open-records collection — double-click/Enter on a result adds the record (any base, no duplicates, Remove/Remove All/Del to close); List All button = explicit whole-base listing; nav-list-replacement design scrapped. ALEPH-WORKFLOW.md search section corrected.
 - Module 5b ACCEPTED by user 2026-07-28 ("works beautifully") after the no-smart-behavior fix.
 - 2026-07-28: user supplied 5 screenshots of his real ALEPH v24 workflow → distilled into `docs/ALEPH-WORKFLOW.md`. UI modules 5b–8 must follow that reference (subfield-per-row layout, header bar, menu-based base switch, search history grid, F8 dialog shape).
 - **Module 5b:** catalog file handling (default `Documents\Apud\catalog.db`, New/Open; ~~remember last path~~ CUT by no-smart-behavior decision), navigation pane (BIB/AUT switch, record list: 001/title/status), read-only viewer with ‡a subfield display (NO dollar signs on screen), plain File→Import Folder calling the 5a engine. Acceptance: he imports his catalog himself and browses it.

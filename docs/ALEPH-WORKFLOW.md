@@ -53,6 +53,13 @@ One field = one block of rows, four columns:
   he iterates queries and compares counts (e.g. "fuero politico" 0 → "fuero" 26).
 - Left tree: **Find** (form search), **Browse** (headings list → our Module 8),
   **Show** (result display).
+- **Layout correction (user, 2026-07-28):** the search screen (form + results +
+  history) lives in the MAIN box; the SIDEBAR is the open-records collection —
+  clicking search results ADDS records to it, any number, across bases, for
+  display/editing. Search results must never replace or hide a base listing;
+  whole-base listing is its own explicit action. Apud follows this from 5c on:
+  main area toggles Search/Record views; sidebar = open records (add from
+  results, Remove/Remove All/Del to close).
 - Apud 5c minimum honoring this: field-scoped search + a session search-history
   list with hit counts. Cross sets are a nice-to-have (docs/DEFERRED.md if cut).
 
