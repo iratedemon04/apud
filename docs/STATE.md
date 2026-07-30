@@ -2,7 +2,7 @@
 *(Session-survival file. THIS repo copy is authoritative; a fresh session reading this + docs/PLAN.md can continue without re-explaining. Update at end of every session and module close.)*
 
 ## Now
-- **START HERE NEXT SESSION: Module 6 — Editor + keymap + templates. BLOCKED ON USER INPUT: his §6.2 keymap red-pen (docs/PLAN.md) is due at the START of 6 — collect it before drafting the step list.**
+- **START HERE NEXT SESSION: Module 6 — Editor + keymap + templates. §6.2 red-pen RECEIVED 2026-07-28 and written into PLAN.md §6.2 (Ctrl+F3 fixed-field editor, Ctrl+N context new/copy, Ctrl+L push [assumed — confirm], Ctrl+F4 validate-field/link-heading; rest = Claude's choice; HARD REQUIREMENT: user-rebindable hotkeys via keymap.json). Step list drafted and presented — awaiting his GO.**
 - Module 5c ACCEPTED by user 2026-07-28 ("this looks great") after the layout rework.
 - **5c layout REWORKED after user correction (2026-07-28):** search screen (base+scope+query form, results, history) lives in the MAIN area with a Search/Record view toggle; the SIDEBAR is the open-records collection — double-click/Enter on a result adds the record (any base, no duplicates, Remove/Remove All/Del to close); List All button = explicit whole-base listing; nav-list-replacement design scrapped. ALEPH-WORKFLOW.md search section corrected.
 - Module 5b ACCEPTED by user 2026-07-28 ("works beautifully") after the no-smart-behavior fix.
@@ -40,8 +40,7 @@
 - Editor "spike" (throwaway UI prototype) proposed by Claude, REJECTED after discussion: user's option-value argument — core layers (Marc.Core/Apud.Data) are UI-independent, so a Module-6 UI surprise costs only thin-layer rework, not weeks; insurance not worth premium. Original 12-module sequence stands. Guiding frame: zero invention, 1960s solved problem, assembly not research; all durable logic lives below Apud.App.
 
 ## Next from user
-- **§6.2 keymap red-pen (docs/PLAN.md) — Module 6 starts with it.**
-- GO on the Module 6 step list once the red-pen is in.
+- **GO on the Module 6 step list (red-pen is in; confirm Ctrl+L-for-push assumption while at it).**
 - §6.2 keymap red-pen (docs/PLAN.md) — due at start of Module 6.
 
 ## Standing working rules (fresh-session refresher)

@@ -156,32 +156,23 @@ DB file default location: `%USERPROFILE%\Documents\<AppName>\catalog.db` (change
 ### 6.1 Keymap engine
 All bindings live in `keymap.json` (portable, user-editable, reloadable). Commands are named (`record.push`, `field.new`, `heading.browse`, ...); the menu bar renders from the same command table, so menus and keys can never disagree. **Chords and menu accelerators both supported.**
 
-### 6.2 Proposed default keymap — **FOR YOUR CORRECTION**
-Modeled on Aleph 500 defaults as best I know them; you know them better. Mark each ✔/✘ and give the binding your hands expect. Columns: proposed key → command.
+### 6.2 Default keymap — **RED-PENNED BY THE USER 2026-07-28** (supersedes the original proposal)
+
+His actual Aleph usage — these are the bindings that matter and are now the shipped defaults:
 
 | Key | Command | Notes |
 |---|---|---|
-| **Ctrl+A** | Open template → new draft record | Aleph "Open Template" |
-| **Ctrl+O** | Open MARC file as new draft | covers your downloaded LC records |
-| **F3** | Browse headings (current base) at caret's field | picker fills authorized form + stores link |
-| **F4** | Browse headings, *other* base | e.g. from AUT record, peek BIB uses |
-| **Ctrl+F3** | Expand from authority (refresh field from linked auth record) | |
-| **F5** | New field — pick from list (tag + name, filtered as you type) | |
-| **F6** | New field — type tag directly | |
-| **F7** | New subfield at caret | |
-| **Ctrl+F5 / Ctrl+F7** | Delete field / delete subfield | |
-| **F8** | Fixed-field form for the field at caret (LDR/006/007/008) | position-by-position dialog, §3.3 |
-| **Ctrl+L** | **Validate + push to base** | your core cycle; errors → message bar |
-| **Ctrl+S** | Save draft (no validation) | |
-| **Ctrl+W** | Check record (validate only, no push) | dry-run of Ctrl+L |
-| **F1** | Help on current field (tag documentation panel) | offline MARC21 docs |
-| **F2** | Search current base (find/browse window) | |
-| **F9** | Record overview / holdings-style summary | v1: simple record summary |
-| **F11 / F12** | Sort fields by tag / renumber-cleanup | explicit commands, never automatic |
-| **Ctrl+D** | Duplicate current record as new draft | "derive" cataloguing |
-| **Ctrl+T** | Save current record **as a template** | templates from real records |
+| **Ctrl+F3** | On LDR/008 (any fixed field): open its data **by position** to edit yourself | the position-by-position dialog (Module 7) — was "F8" in the old proposal |
+| **Ctrl+N** | Context-sensitive: no record displayed → **new record**; standing in a displayed record → **copy it as a new draft** (no push, 001 cleared — sequence fills it at push) | replaces Ctrl+A/Ctrl+D of the old proposal |
+| **Ctrl+L** | Validate + **push to base** | assumed from "ctr for pushing" — flag to him if wrong |
+| **Ctrl+F4** | On a field: **validate it**; on a controlled heading (e.g. 650): popup of the AUT list **positioned alphabetically at that heading** — Enter links BOTH records (bib field ↔ aut record) | replaces F3-browse of the old proposal (Module 8) |
 
-Anything you correct becomes the shipped default; Aleph-faithful is the acceptance criterion.
+Everything else "doesn't matter much" (his words) — remaining defaults are Claude's to choose sensibly, BUT the hard requirement is:
+
+**→ Hotkeys must be user-changeable (keymap.json). This is what actually matters to him. First-class feature, not an afterthought.**
+
+Secondary defaults (kept from the old proposal, all rebindable): F5/F6 new field (pick list / direct tag), F7 new subfield, Ctrl+F5/Ctrl+F7 delete field/subfield, Ctrl+S save draft, Ctrl+W validate-only, Ctrl+T save as template, F1 field help, F2 search.
+Catalogue commands (New/Open Catalogue) LOSE their Ctrl+N/Ctrl+O shortcuts — menu-only — so record commands own the keyboard.
 
 ### 6.3 Authority browse behavior (F3)
 1. Caret in a controlled field (configurable set; default 100/110/111/130/240/6XX/700/710/711/730/800/810/811/830 for BIB) → F3 opens the browse list **positioned alphabetically at the current field text** (normalized comparison).
