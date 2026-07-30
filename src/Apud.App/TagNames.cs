@@ -8,7 +8,13 @@ namespace Apud.App;
 /// </summary>
 public static class TagNames
 {
-    public static string For(string tag) => Names.TryGetValue(tag, out var n) ? n : "";
+    public static string For(string tag)
+    {
+        if (Names.TryGetValue(tag, out var n)) return n;
+        // 9XX block is reserved for local use — name them as such rather than blank.
+        if (tag.Length == 3 && tag[0] == '9') return "Local";
+        return "";
+    }
 
     private static readonly Dictionary<string, string> Names = new()
     {
@@ -29,6 +35,7 @@ public static class TagNames
         ["050"] = "LC Call No.",
         ["082"] = "Dewey Class No.",
         ["083"] = "Dewey Class No.",
+        ["084"] = "Other Class No.",
         ["090"] = "Local Call No.",
         ["100"] = "Main Entry--Pers.",
         ["110"] = "Main Entry--Corp.",
@@ -58,6 +65,7 @@ public static class TagNames
         ["505"] = "Contents Note",
         ["520"] = "Summary",
         ["546"] = "Language Note",
+        ["590"] = "Local Note",
         ["600"] = "Subject--Pers.",
         ["610"] = "Subject--Corp.",
         ["611"] = "Subject--Meet.",
@@ -72,6 +80,7 @@ public static class TagNames
         ["711"] = "Added Entry--Meet.",
         ["730"] = "Added Entry--Unif.Title",
         ["740"] = "Added Entry--Title",
+        ["773"] = "Host Item",
         ["776"] = "Other Form Entry",
         ["830"] = "Series--Unif.Title",
         ["852"] = "Location",

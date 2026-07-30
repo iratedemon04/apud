@@ -64,13 +64,14 @@ public class RecordDisplayTests
     }
 
     [Fact]
-    public void Unknown_tags_get_an_empty_name_but_keep_their_tag()
+    public void Unknown_tags_get_an_empty_name_but_9XX_reads_Local()
     {
         var rows = RecordDisplay.Build(Parse(
-            "=LDR  00000nam a2200000 i 4500\n=987  \\\\$aMisterioso\n"));
+            "=LDR  00000nam a2200000 i 4500\n=387  \\\\$aMisterioso\n=901  \\\\$aColección X\n=773  0\\$tRevista\n"));
 
-        var row = rows.Single(r => r.Tag == "987");
-        Assert.Equal("", row.FieldName);
+        Assert.Equal("", rows.Single(r => r.Tag == "387").FieldName);
+        Assert.Equal("Local", rows.Single(r => r.Tag == "901").FieldName);
+        Assert.Equal("Host Item", rows.Single(r => r.Tag == "773").FieldName);
     }
 
     [Fact]
