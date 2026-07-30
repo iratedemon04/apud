@@ -9,6 +9,7 @@ namespace Apud.Tests;
 /// codes in their own column, '^' for blanks in LDR/control data, '_' for blank
 /// indicators, and never a '$' of .mrk notation on screen.
 /// </summary>
+[Collection("TagNames statics")] // TagNamesTests swaps the static override table; keep them off parallel tracks
 public class RecordDisplayTests
 {
     private static MarcRecord Parse(string mrk) => MrkReader.Read(mrk).Records[0];

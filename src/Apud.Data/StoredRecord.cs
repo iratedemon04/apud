@@ -31,6 +31,9 @@ public sealed class StoredRecord
     }
 }
 
-/// <summary>One row of a record list (navigation pane, search results) — no field data loaded.</summary>
+/// <summary>One row of a record list (navigation pane, search results) — no field data loaded.
+/// Author is the 1XX heading (7XX when there is none); Year comes from 008/07-10,
+/// falling back to 260/264 $c. Either may be empty — display what's there.</summary>
 public sealed record RecordSummary(
-    long Id, string Base, string? ControlNumber, RecordStatus Status, string Title, DateTime UpdatedUtc);
+    long Id, string Base, string? ControlNumber, RecordStatus Status, string Title,
+    string Author, string Year, DateTime UpdatedUtc);

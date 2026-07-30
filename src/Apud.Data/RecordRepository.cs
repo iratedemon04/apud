@@ -198,11 +198,20 @@ public sealed class RecordRepository
         var list = new List<RecordSummary>();
         using var cmd = _db.Connection.CreateCommand();
         // Title for the list pane: 245$a for BIB; 1XX first subfield works for both bases.
+        // Author: 100/110/111 heading, falling back to the first 700/710/711.
+        // Year: 008 date bytes, else 260/264 $c — extracted in code below.
         cmd.CommandText = """
             SELECT r.id, r.base, r.control_number, r.status, r.updated_utc,
                    (SELECT f.content FROM field f
                      WHERE f.record_id = r.id AND (f.tag = '245' OR f.tag LIKE '1__')
-                     ORDER BY CASE WHEN f.tag = '245' THEN 0 ELSE 1 END, f.seq LIMIT 1)
+                     ORDER BY CASE WHEN f.tag = '245' THEN 0 ELSE 1 END, f.seq LIMIT 1),
+                   (SELECT f.content FROM field f
+                     WHERE f.record_id = r.id AND f.tag IN ('100','110','111','700','710','711')
+                     ORDER BY CASE WHEN f.tag LIKE '1__' THEN 0 ELSE 1 END, f.seq LIMIT 1),
+                   (SELECT f.content FROM field f
+                     WHERE f.record_id = r.id AND f.tag = '008' ORDER BY f.seq LIMIT 1),
+                   (SELECT f.content FROM field f
+                     WHERE f.record_id = r.id AND f.tag IN ('260','264') ORDER BY f.seq LIMIT 1)
             FROM record r WHERE r.base = $base
             ORDER BY CAST(r.control_number AS INTEGER), r.id;
             """;
@@ -211,11 +220,14 @@ public sealed class RecordRepository
         while (r.Read())
         {
             string title = r.IsDBNull(5) ? "" : FirstSubfieldValue(r.GetString(5));
+            string author = r.IsDBNull(6) ? "" : FirstSubfieldValue(r.GetString(6));
+            string year = YearOf(r.IsDBNull(7) ? null : r.GetString(7),
+                                 r.IsDBNull(8) ? null : r.GetString(8));
             list.Add(new RecordSummary(
                 r.GetInt64(0), r.GetString(1),
                 r.IsDBNull(2) ? null : r.GetString(2),
                 r.GetString(3) == "pushed" ? RecordStatus.Pushed : RecordStatus.Draft,
-                title,
+                title, author, year,
                 DateTime.Parse(r.GetString(4)).ToUniversalTime()));
         }
         return list;
@@ -367,6 +379,26 @@ public sealed class RecordRepository
         if (packed.Length == 0) return;
         foreach (var chunk in packed.Split(MarcConstants.SubfieldDelimiter, StringSplitOptions.RemoveEmptyEntries))
             field.Subfields.Add(new MarcSubfield(chunk[0], chunk.Substring(1)));
+    }
+
+    /// <summary>
+    /// Year for a list row: 008 Date 1 (bytes 07-10) when it carries anything
+    /// (partial dates like "19uu" are real data — shown as-is); otherwise the
+    /// 260/264 $c publication date. Empty when the record has neither.
+    /// </summary>
+    private static string YearOf(string? f008, string? packedPub)
+    {
+        if (f008 is { Length: >= 11 })
+        {
+            string date1 = f008.Substring(7, 4).Trim(' ', '\\', '|');
+            if (date1.Length > 0) return date1;
+        }
+        if (packedPub != null)
+        {
+            foreach (var chunk in packedPub.Split(MarcConstants.SubfieldDelimiter, StringSplitOptions.RemoveEmptyEntries))
+                if (chunk[0] == 'c') return chunk.Substring(1).Trim();
+        }
+        return "";
     }
 
     private static string FirstSubfieldValue(string packed)

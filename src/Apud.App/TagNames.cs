@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Apud.App;
 
 /// <summary>
@@ -5,18 +7,83 @@ namespace Apud.App;
 /// (docs/ALEPH-WORKFLOW.md). English only in this version; localization is a
 /// v2/v3 concern. Unknown tags display with an empty name — the tag itself is
 /// always visible in its own column, so nothing is ever hidden.
+///
+/// User-editable via tagnames.json next to the exe, same contract keymap.json
+/// will follow (docs/PLAN.md §6.2): missing file or missing entry → built-in
+/// default; a bad entry is skipped and reported; a broken file is reported and
+/// the built-ins stand. Never crashes.
 /// </summary>
 public static class TagNames
 {
+    public const string FileName = "tagnames.json";
+
+    private static Dictionary<string, string> _overrides = new();
+
     public static string For(string tag)
     {
-        if (Names.TryGetValue(tag, out var n)) return n;
+        if (_overrides.TryGetValue(tag, out var o)) return o;
+        if (Defaults.TryGetValue(tag, out var n)) return n;
         // 9XX block is reserved for local use — name them as such rather than blank.
         if (tag.Length == 3 && tag[0] == '9') return "Local";
         return "";
     }
 
-    private static readonly Dictionary<string, string> Names = new()
+    /// <summary>Loads overrides from a tagnames.json. Returns null when all is
+    /// well (a missing file is well — built-ins apply); otherwise a one-line
+    /// report for the message bar.</summary>
+    public static string? LoadFile(string path)
+    {
+        if (!File.Exists(path)) { _overrides = new(); return null; }
+        string json;
+        try { json = File.ReadAllText(path); }
+        catch (Exception ex)
+        {
+            _overrides = new();
+            return $"{FileName} not read ({ex.Message}) — using built-in names.";
+        }
+        return ApplyJson(json);
+    }
+
+    /// <summary>Parses and applies override entries; separated from file I/O so
+    /// tests can run it headless. Returns null or a one-line report.</summary>
+    internal static string? ApplyJson(string json)
+    {
+        var options = new JsonDocumentOptions
+        {
+            CommentHandling = JsonCommentHandling.Skip,
+            AllowTrailingCommas = true,
+        };
+        try
+        {
+            using var doc = JsonDocument.Parse(json, options);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                _overrides = new();
+                return $"{FileName} ignored (expected an object of \"tag\": \"name\" pairs) — using built-in names.";
+            }
+
+            var map = new Dictionary<string, string>();
+            var skipped = new List<string>();
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                if (prop.Value.ValueKind == JsonValueKind.String)
+                    map[prop.Name] = prop.Value.GetString()!;
+                else
+                    skipped.Add(prop.Name);
+            }
+            _overrides = map;
+            return skipped.Count == 0
+                ? null
+                : $"{FileName}: skipped non-text entr{(skipped.Count == 1 ? "y" : "ies")} {string.Join(", ", skipped)} — built-in names used for those.";
+        }
+        catch (JsonException ex)
+        {
+            _overrides = new();
+            return $"{FileName} ignored (line {ex.LineNumber + 1}: not valid JSON) — using built-in names.";
+        }
+    }
+
+    private static readonly Dictionary<string, string> Defaults = new()
     {
         ["LDR"] = "Leader",
         ["001"] = "Control No.",

@@ -120,6 +120,23 @@ public class RecordRepositoryTests : IDisposable
         var list = Repo.List("BIB");
         Assert.Equal(new[] { "2", "10" }, list.Select(s => s.ControlNumber).ToArray());
         Assert.StartsWith("Otros proyectos", list[0].Title);
+        Assert.Equal("Moreno, Matías", list[0].Author); // 100, first subfield
+        Assert.Equal("2017", list[0].Year);             // 008 Date 1
+    }
+
+    [Fact]
+    public void List_year_falls_back_to_publication_field_when_008_has_no_date()
+    {
+        var rec = Parse(
+            "=LDR  00000nam a2200000 i 4500\n" +
+            "=245  10$aSin fecha en 008\n" +
+            "=260  \\\\$aMéxico :$bEl Colegio,$c1998.\n" +
+            "=700  1\\$aPaz, Octavio\n");
+        Repo.Insert(new StoredRecord("BIB", rec));
+
+        var row = Repo.List("BIB").Single();
+        Assert.Equal("1998.", row.Year);          // 260 $c shown as written
+        Assert.Equal("Paz, Octavio", row.Author); // no 1XX → first 7XX
     }
 
     [Fact]

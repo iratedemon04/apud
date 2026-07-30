@@ -188,8 +188,10 @@ public sealed class MainForm : Form
             HideSelection = false,
         };
         _resultsList.Columns.Add("001", 70);
-        _resultsList.Columns.Add("Title", 420);
-        _resultsList.Columns.Add("Status", 70);
+        _resultsList.Columns.Add("Title", 300);
+        _resultsList.Columns.Add("Author", 180);
+        _resultsList.Columns.Add("Year", 50);
+        _resultsList.Columns.Add("Status", 60);
         _resultsList.DoubleClick += (_, _) => OpenSelectedResult();
         _resultsList.KeyDown += (_, e) =>
         {
@@ -299,7 +301,9 @@ public sealed class MainForm : Form
         // to a previous catalogue, remembers nothing between sessions, and creates
         // nothing on its own — cataloguers must consciously choose the database
         // every session, exactly like Aleph's Connect to...
-        Load += (_, _) => SetMessage("No catalogue open — File → New Catalogue or Open Catalogue.");
+        string? tagNamesReport = TagNames.LoadFile(Path.Combine(AppContext.BaseDirectory, TagNames.FileName));
+        Load += (_, _) => SetMessage(tagNamesReport
+            ?? "No catalogue open — File → New Catalogue or Open Catalogue.");
         FormClosed += (_, _) => _db?.Dispose();
     }
 
@@ -468,6 +472,8 @@ public sealed class MainForm : Form
         {
             var item = new ListViewItem(s.ControlNumber ?? "");
             item.SubItems.Add(s.Title);
+            item.SubItems.Add(s.Author);
+            item.SubItems.Add(s.Year);
             item.SubItems.Add(s.Status == RecordStatus.Pushed ? "pushed" : "draft");
             item.Tag = s;
             _resultsList.Items.Add(item);
