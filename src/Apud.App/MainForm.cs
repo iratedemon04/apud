@@ -228,6 +228,10 @@ public sealed class MainForm : Form
             AutoEllipsis = true,
         };
 
+        // Module 5.9: the Aleph editor look (docs/inspiration/README.md) — a
+        // white page of dense text, not a form. No grid lines, no boxes, rows
+        // tight like a text editor; red underlined tags and subfield codes,
+        // bold black data text.
         _viewer = new DataGridView
         {
             Dock = DockStyle.Fill,
@@ -240,17 +244,22 @@ public sealed class MainForm : Form
             MultiSelect = false,
             BackgroundColor = SystemColors.Window,
             BorderStyle = BorderStyle.None,
-            CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
-            GridColor = Color.FromArgb(235, 235, 235),
+            CellBorderStyle = DataGridViewCellBorderStyle.None,
             ColumnHeadersVisible = false,
             AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells,
         };
-        var mono = new Font("Consolas", 10f);
-        _viewer.Columns.Add(NewColumn("name", 150, italic: true));
-        _viewer.Columns.Add(NewColumn("tag", 45, color: Color.DarkRed, font: mono, bold: true));
-        _viewer.Columns.Add(NewColumn("ind", 38, font: mono));
-        _viewer.Columns.Add(NewColumn("code", 30, color: Color.DarkRed, font: mono, bold: true));
-        var value = NewColumn("value", 200, font: mono);
+        _viewer.DefaultCellStyle.Padding = new Padding(0);
+        _viewer.DefaultCellStyle.SelectionBackColor = Color.FromArgb(225, 238, 250);
+        _viewer.DefaultCellStyle.SelectionForeColor = Color.Black;
+        _viewer.RowTemplate.Height = 17;
+
+        var mono = new Font("Consolas", 9.75f);
+        _viewer.Columns.Add(NewColumn("name", 140, italic: true, color: Color.Maroon,
+            font: new Font("Segoe UI", 8.25f)));
+        _viewer.Columns.Add(NewColumn("tag", 42, color: Color.Red, font: mono, bold: true, underline: true));
+        _viewer.Columns.Add(NewColumn("ind", 34, font: mono));
+        _viewer.Columns.Add(NewColumn("code", 26, color: Color.Red, font: mono, bold: true, underline: true));
+        var value = NewColumn("value", 200, font: mono, bold: true);
         value.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
         value.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
         _viewer.Columns.Add(value);
@@ -295,13 +304,20 @@ public sealed class MainForm : Form
     }
 
     private static DataGridViewTextBoxColumn NewColumn(
-        string name, int width, bool italic = false, bool bold = false, Color? color = null, Font? font = null)
+        string name, int width, bool italic = false, bool bold = false, bool underline = false,
+        Color? color = null, Font? font = null)
     {
         var col = new DataGridViewTextBoxColumn { Name = name, Width = width, ReadOnly = true };
         var style = col.DefaultCellStyle;
-        if (color is Color c) style.ForeColor = c;
+        if (color is Color c)
+        {
+            style.ForeColor = c;
+            style.SelectionForeColor = c; // colored columns keep their color when selected
+        }
         Font baseFont = font ?? new Font("Segoe UI", 9f);
-        var flags = (italic ? FontStyle.Italic : FontStyle.Regular) | (bold ? FontStyle.Bold : FontStyle.Regular);
+        var flags = (italic ? FontStyle.Italic : FontStyle.Regular)
+                  | (bold ? FontStyle.Bold : FontStyle.Regular)
+                  | (underline ? FontStyle.Underline : FontStyle.Regular);
         style.Font = new Font(baseFont, flags);
         return col;
     }
