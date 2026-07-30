@@ -256,9 +256,9 @@ public sealed class MainForm : Form
         var mono = new Font("Consolas", 9.75f);
         _viewer.Columns.Add(NewColumn("name", 140, italic: true, color: Color.Maroon,
             font: new Font("Segoe UI", 8.25f)));
-        _viewer.Columns.Add(NewColumn("tag", 42, color: Color.Red, font: mono, bold: true, underline: true));
+        _viewer.Columns.Add(NewColumn("tag", 42, font: mono, bold: true, underline: true));
         _viewer.Columns.Add(NewColumn("ind", 34, font: mono));
-        _viewer.Columns.Add(NewColumn("code", 26, color: Color.Red, font: mono, bold: true, underline: true));
+        _viewer.Columns.Add(NewColumn("code", 26, font: mono, bold: true, underline: true));
         var value = NewColumn("value", 200, font: mono, bold: true);
         value.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
         value.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
