@@ -144,6 +144,119 @@ public class EditorDocumentTests
         Assert.Equal(4, doc.Record.Fields.Count);
     }
 
+    // ---------- undo / redo ----------
+
+    [Fact]
+    public void Undo_and_redo_a_value_edit()
+    {
+        var doc = Doc();
+        doc.SetSubfieldValue(3, 0, "Otro título"); // 245 $a
+        Assert.Equal("Otro título", doc.Record.Fields[3].Subfields[0].Value);
+
+        Assert.True(doc.Undo());
+        Assert.Equal("Grandes proyectos", doc.Record.Fields[3].Subfields[0].Value);
+
+        Assert.True(doc.Redo());
+        Assert.Equal("Otro título", doc.Record.Fields[3].Subfields[0].Value);
+    }
+
+    [Fact]
+    public void Undo_reverts_structural_edits_without_reordering()
+    {
+        var doc = Doc();
+        doc.InsertBlankFieldAfter(1); // blank after 008
+        Assert.Equal(6, doc.Record.Fields.Count);
+
+        doc.Undo();
+        Assert.Equal(new[] { "001", "008", "100", "245", "650" },
+            doc.Record.Fields.Select(f => f.Tag).ToArray());
+    }
+
+    [Fact]
+    public void Undo_restores_a_deleted_field_with_its_content_and_place()
+    {
+        var doc = Doc();
+        doc.DeleteField(2); // 100
+        Assert.DoesNotContain(doc.Record.Fields, f => f.Tag == "100");
+
+        doc.Undo();
+        Assert.Equal(2, doc.Record.Fields.FindIndex(f => f.Tag == "100")); // back in place
+        Assert.Equal("Moreno, Matías", doc.Record.Fields[2].Subfields[0].Value);
+    }
+
+    [Fact]
+    public void Undo_reverts_a_retag_and_its_reshaped_subfields()
+    {
+        var doc = Doc();
+        int at = doc.InsertBlankFieldAfter(4); // blank field, control-shaped
+        doc.SetTag(at, "500");                 // becomes a data field with a blank ‡a
+        Assert.Single(doc.Record.Fields[at].Subfields);
+
+        doc.Undo();                            // back to the blank field
+        Assert.Equal("   ", doc.Record.Fields[at].Tag);
+        Assert.Empty(doc.Record.Fields[at].Subfields);
+    }
+
+    [Fact]
+    public void Dirty_clears_when_undo_returns_to_the_saved_state()
+    {
+        var doc = Doc(); // loaded from the catalogue → clean
+        Assert.False(doc.Dirty);
+
+        doc.SetSubfieldValue(3, 0, "x");
+        Assert.True(doc.Dirty);
+
+        doc.Undo();
+        Assert.False(doc.Dirty); // exactly back to the saved bytes
+    }
+
+    [Fact]
+    public void Saving_then_undoing_below_the_save_point_is_dirty_again()
+    {
+        var doc = Doc();
+        doc.SetSubfieldValue(3, 0, "x");
+        doc.MarkSaved();
+        Assert.False(doc.Dirty);
+
+        doc.Undo();
+        Assert.True(doc.Dirty);  // undone past where we saved
+        doc.Redo();
+        Assert.False(doc.Dirty); // and back
+    }
+
+    [Fact]
+    public void A_new_edit_discards_the_redo_stack()
+    {
+        var doc = Doc();
+        doc.SetSubfieldValue(3, 0, "a");
+        doc.Undo();
+        doc.SetSubfieldValue(3, 0, "b"); // diverge from the undone branch
+
+        Assert.False(doc.Redo());
+        Assert.Equal("b", doc.Record.Fields[3].Subfields[0].Value);
+    }
+
+    [Fact]
+    public void Undo_and_redo_are_noops_when_empty()
+    {
+        var doc = Doc();
+        Assert.False(doc.CanUndo);
+        Assert.False(doc.Undo());
+        Assert.False(doc.CanRedo);
+        Assert.False(doc.Redo());
+    }
+
+    [Fact]
+    public void A_no_op_edit_records_nothing_to_undo()
+    {
+        var doc = Doc();
+        string same = doc.Record.Fields[3].Subfields[0].Value;
+        doc.SetSubfieldValue(3, 0, same); // sets the same value back
+
+        Assert.False(doc.CanUndo);
+        Assert.False(doc.Dirty);
+    }
+
     // ---------- Ctrl+N copy semantics ----------
 
     [Fact]

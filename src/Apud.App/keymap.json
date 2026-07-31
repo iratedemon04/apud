@@ -18,6 +18,8 @@
   "record.new": "Ctrl+N",
   "record.save-draft": "Ctrl+S",
   "record.save-template": "Ctrl+T",
+  "record.undo": "Ctrl+Z",
+  "record.redo": "Ctrl+Y",
   "field.new": "F6",
   "subfield.new": "F7",
   "field.delete": "Ctrl+F5",

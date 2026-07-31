@@ -1,3 +1,4 @@
+using System.Text;
 using Marc.Core;
 using Apud.Data;
 
@@ -13,23 +14,39 @@ namespace Apud.App;
 ///
 /// Display text conventions are undone on the way in: '^' means blank in
 /// LDR/control data, '_' means blank in indicators.
+///
+/// Undo/redo (user, 2026-07-31): every mutation runs through <see cref="Apply"/>,
+/// which snapshots the record before the change and keeps the snapshot only if
+/// something actually changed — so Ctrl+Z reverts anything and Ctrl+Y reapplies
+/// it, with no per-operation inverse logic to get wrong. Records are a few dozen
+/// fields, so whole-record snapshots are the simplest correct design.
 /// </summary>
 public sealed class EditorDocument
 {
     public StoredRecord Stored { get; }
     public MarcRecord Record => Stored.Record;
 
-    /// <summary>True when the document differs from what the catalogue holds
-    /// (including never having been saved at all).</summary>
-    public bool Dirty { get; private set; }
+    private readonly Stack<Memento> _undo = new();
+    private readonly Stack<Memento> _redo = new();
+
+    /// <summary>Signature of the last saved state; null means "never saved"
+    /// (a brand-new or copied record is dirty until its first save).</summary>
+    private string? _savedSignature;
 
     public EditorDocument(StoredRecord stored, bool dirty = false)
     {
         Stored = stored;
-        Dirty = dirty;
+        _savedSignature = dirty ? null : Sign();
     }
 
-    public void MarkSaved() => Dirty = false;
+    /// <summary>True when the record differs from what the catalogue holds.
+    /// Undoing back to the saved state clears it; branching away sets it again.</summary>
+    public bool Dirty => _savedSignature is null || Sign() != _savedSignature;
+
+    public void MarkSaved() => _savedSignature = Sign();
+
+    public bool CanUndo => _undo.Count > 0;
+    public bool CanRedo => _redo.Count > 0;
 
     // ---------- cell edits ----------
 
@@ -40,7 +57,7 @@ public sealed class EditorDocument
         text = Uncaret(text);
         if (text.Length != MarcConstants.LeaderLength)
             return $"Leader must be exactly {MarcConstants.LeaderLength} characters (got {text.Length}) — not changed.";
-        if (Record.Leader != text) { Record.Leader = text; Dirty = true; }
+        Apply(() => Record.Leader = text);
         return null;
     }
 
@@ -75,8 +92,7 @@ public sealed class EditorDocument
             replacement.Subfields.Add(new MarcSubfield('a', ""));
         }
 
-        Record.Fields[fieldIndex] = replacement;
-        Dirty = true;
+        Apply(() => Record.Fields[fieldIndex] = replacement);
         return null;
     }
 
@@ -85,19 +101,14 @@ public sealed class EditorDocument
         var f = Record.Fields[fieldIndex];
         if (f.IsControl) return;
         string ind = (text.Replace("_", " ") + "  ")[..2];
-        if (f.Ind1 == ind[0] && f.Ind2 == ind[1]) return;
-        f.Ind1 = ind[0];
-        f.Ind2 = ind[1];
-        Dirty = true;
+        Apply(() => { f.Ind1 = ind[0]; f.Ind2 = ind[1]; });
     }
 
     public void SetControlData(int fieldIndex, string text)
     {
         var f = Record.Fields[fieldIndex];
-        text = Uncaret(text);
-        if (f.ControlData == text) return;
-        f.ControlData = text;
-        Dirty = true;
+        string value = Uncaret(text);
+        Apply(() => f.ControlData = value);
     }
 
     /// <summary>First character of <paramref name="text"/> becomes the code; on
@@ -107,16 +118,11 @@ public sealed class EditorDocument
         var f = Record.Fields[fieldIndex];
         if (f.IsControl) return;
         char code = text.Length > 0 ? text[0] : ' ';
-        if (subfieldIndex < 0)
+        Apply(() =>
         {
-            f.Subfields.Add(new MarcSubfield(code, ""));
-        }
-        else
-        {
-            if (f.Subfields[subfieldIndex].Code == code) return;
-            f.Subfields[subfieldIndex].Code = code;
-        }
-        Dirty = true;
+            if (subfieldIndex < 0) f.Subfields.Add(new MarcSubfield(code, ""));
+            else f.Subfields[subfieldIndex].Code = code;
+        });
     }
 
     /// <summary>On an empty data field (subfieldIndex -1) typing a value
@@ -125,17 +131,17 @@ public sealed class EditorDocument
     {
         var f = Record.Fields[fieldIndex];
         if (f.IsControl) { SetControlData(fieldIndex, text); return; }
-        if (subfieldIndex < 0)
+        Apply(() =>
         {
-            if (text.Length == 0) return;
-            f.Subfields.Add(new MarcSubfield('a', text));
-        }
-        else
-        {
-            if (f.Subfields[subfieldIndex].Value == text) return;
-            f.Subfields[subfieldIndex].Value = text;
-        }
-        Dirty = true;
+            if (subfieldIndex < 0)
+            {
+                if (text.Length > 0) f.Subfields.Add(new MarcSubfield('a', text));
+            }
+            else
+            {
+                f.Subfields[subfieldIndex].Value = text;
+            }
+        });
     }
 
     // ---------- structure ----------
@@ -148,8 +154,7 @@ public sealed class EditorDocument
     public int InsertBlankFieldAfter(int fieldIndex)
     {
         int at = Math.Min(fieldIndex + 1, Record.Fields.Count);
-        Record.Fields.Insert(at, new MarcField("   "));
-        Dirty = true;
+        Apply(() => Record.Fields.Insert(at, new MarcField("   ")));
         return at;
     }
 
@@ -160,16 +165,12 @@ public sealed class EditorDocument
         var f = Record.Fields[fieldIndex];
         if (f.IsControl) return (-1, $"{f.Tag} is a control field — it has no subfields.");
         int at = Math.Min(subfieldIndex + 1, f.Subfields.Count);
-        f.Subfields.Insert(at, new MarcSubfield('a', ""));
-        Dirty = true;
+        Apply(() => f.Subfields.Insert(at, new MarcSubfield('a', "")));
         return (at, null);
     }
 
-    public void DeleteField(int fieldIndex)
-    {
-        Record.Fields.RemoveAt(fieldIndex);
-        Dirty = true;
-    }
+    public void DeleteField(int fieldIndex) =>
+        Apply(() => Record.Fields.RemoveAt(fieldIndex));
 
     /// <summary>Deletes one subfield; the field itself stays even at zero
     /// subfields (Ctrl+F5 is how a field goes away).</summary>
@@ -177,8 +178,40 @@ public sealed class EditorDocument
     {
         var f = Record.Fields[fieldIndex];
         if (f.IsControl || subfieldIndex < 0) return;
-        f.Subfields.RemoveAt(subfieldIndex);
-        Dirty = true;
+        Apply(() => f.Subfields.RemoveAt(subfieldIndex));
+    }
+
+    // ---------- undo / redo ----------
+
+    /// <summary>Reverts the last change that actually altered the record.</summary>
+    public bool Undo()
+    {
+        if (_undo.Count == 0) return false;
+        _redo.Push(Capture());
+        Restore(_undo.Pop());
+        return true;
+    }
+
+    public bool Redo()
+    {
+        if (_redo.Count == 0) return false;
+        _undo.Push(Capture());
+        Restore(_redo.Pop());
+        return true;
+    }
+
+    /// <summary>Runs a mutation, keeping an undo snapshot only if it changed the
+    /// record. Redo history is discarded the moment a new change lands.</summary>
+    private void Apply(Action mutate)
+    {
+        var before = Capture();
+        string beforeSig = Sign();
+        mutate();
+        if (Sign() != beforeSig)
+        {
+            _undo.Push(before);
+            _redo.Clear();
+        }
     }
 
     // ---------- copies (Ctrl+N in a record) ----------
@@ -194,17 +227,57 @@ public sealed class EditorDocument
         foreach (var f in source.Fields)
         {
             if (f.Tag == "001") continue;
-            var c = new MarcField(f.Tag)
-            {
-                ControlData = f.ControlData,
-                Ind1 = f.Ind1,
-                Ind2 = f.Ind2,
-                AuthLinkId = f.AuthLinkId,
-            };
-            c.Subfields.AddRange(f.Subfields.Select(s => new MarcSubfield(s.Code, s.Value)));
-            copy.Fields.Add(c);
+            copy.Fields.Add(CloneField(f));
         }
         return copy;
+    }
+
+    // ---------- snapshots ----------
+
+    private sealed record Memento(string Leader, List<MarcField> Fields);
+
+    private Memento Capture() => new(Record.Leader, Record.Fields.Select(CloneField).ToList());
+
+    private void Restore(Memento m)
+    {
+        Record.Leader = m.Leader;
+        Record.Fields.Clear();
+        // Clone on the way out too, so the memento can be reused (redo) intact.
+        Record.Fields.AddRange(m.Fields.Select(CloneField));
+    }
+
+    private static MarcField CloneField(MarcField f)
+    {
+        var c = new MarcField(f.Tag)
+        {
+            ControlData = f.ControlData,
+            Ind1 = f.Ind1,
+            Ind2 = f.Ind2,
+            AuthLinkId = f.AuthLinkId,
+        };
+        c.Subfields.AddRange(f.Subfields.Select(s => new MarcSubfield(s.Code, s.Value)));
+        return c;
+    }
+
+    /// <summary>A stable string that changes iff the record's content changes —
+    /// used both for change detection and for the saved/dirty comparison. The
+    /// separators are ASCII control codes that cannot occur in MARC data.</summary>
+    private string Sign()
+    {
+        const char unit = '';   // between the parts of one field
+        const char group = '';  // between fields
+        var sb = new StringBuilder();
+        sb.Append(Record.Leader).Append(group);
+        foreach (var f in Record.Fields)
+        {
+            sb.Append(f.Tag).Append(f.Ind1).Append(f.Ind2).Append(unit)
+              .Append(f.ControlData ?? "").Append(unit)
+              .Append(f.AuthLinkId?.ToString() ?? "").Append(unit);
+            foreach (var s in f.Subfields)
+                sb.Append(unit).Append(s.Code).Append(s.Value);
+            sb.Append(group);
+        }
+        return sb.ToString();
     }
 
     // ---------- helpers ----------

@@ -81,6 +81,8 @@ public sealed class MainForm : Form
         _commands.Add(new Command { Id = "record.new", Name = "&New Record / Copy", DefaultKey = "Ctrl+N", Execute = NewRecord });
         _commands.Add(new Command { Id = "record.save-draft", Name = "&Save Draft", Context = CommandContext.Editor, DefaultKey = "Ctrl+S", Execute = SaveDraft });
         _commands.Add(new Command { Id = "record.save-template", Name = "Save as &Template...", Context = CommandContext.Editor, DefaultKey = "Ctrl+T", Execute = SaveTemplate });
+        _commands.Add(new Command { Id = "record.undo", Name = "&Undo", Context = CommandContext.Editor, DefaultKey = "Ctrl+Z", Execute = UndoEdit });
+        _commands.Add(new Command { Id = "record.redo", Name = "&Redo", Context = CommandContext.Editor, DefaultKey = "Ctrl+Y", Execute = RedoEdit });
         _commands.Add(new Command { Id = "field.new", Name = "New &Field", Context = CommandContext.Editor, DefaultKey = "F6", Execute = NewField });
         _commands.Add(new Command { Id = "subfield.new", Name = "New Su&bfield", Context = CommandContext.Editor, DefaultKey = "F7", Execute = NewSubfield });
         _commands.Add(new Command { Id = "field.delete", Name = "&Delete Field", Context = CommandContext.Editor, DefaultKey = "Ctrl+F5", Execute = DeleteCurrentField });
@@ -117,6 +119,9 @@ public sealed class MainForm : Form
         record.DropDownItems.Add(MenuItem("record.new"));
         record.DropDownItems.Add(MenuItem("record.save-draft"));
         record.DropDownItems.Add(MenuItem("record.save-template"));
+        record.DropDownItems.Add(new ToolStripSeparator());
+        record.DropDownItems.Add(MenuItem("record.undo"));
+        record.DropDownItems.Add(MenuItem("record.redo"));
         record.DropDownItems.Add(new ToolStripSeparator());
         record.DropDownItems.Add(MenuItem("field.new"));
         record.DropDownItems.Add(MenuItem("subfield.new"));
@@ -295,6 +300,7 @@ public sealed class MainForm : Form
             AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells,
         };
         _viewer.CellEndEdit += ViewerCellEndEdit;
+        _viewer.EditingControlShowing += ViewerEditingControlShowing;
         _viewer.DefaultCellStyle.Padding = new Padding(0);
         _viewer.DefaultCellStyle.SelectionBackColor = Color.FromArgb(225, 238, 250);
         _viewer.DefaultCellStyle.SelectionForeColor = Color.Black;
@@ -787,7 +793,43 @@ public sealed class MainForm : Form
         if (structural) BeginInvoke(RenderRecord);
     }
 
+    /// <summary>Caps the editing box by column to the fixed MARC widths: a tag
+    /// is 3 characters, indicators 2, a subfield code 1. Any characters are
+    /// allowed within that width (dumb editor) — only the length is fixed. The
+    /// grid reuses one editing control across cells, so this is set every time.</summary>
+    private void ViewerEditingControlShowing(object? sender, DataGridViewEditingControlShowingEventArgs e)
+    {
+        if (e.Control is not TextBox tb) return;
+        tb.MaxLength = _viewer.CurrentCell?.OwningColumn.Name switch
+        {
+            "tag" => 3,
+            "ind" => 2,
+            "code" => 1,
+            _ => 0, // 0 = unlimited (value and control-data cells)
+        };
+    }
+
     private static string Caret(string s) => s.Replace(' ', '^');
+
+    private void UndoEdit()
+    {
+        if (_currentDoc is null) { SetMessage("No record on screen."); return; }
+        _viewer.EndEdit(); // commit any in-progress cell edit so Ctrl+Z reverts it too
+        if (!_currentDoc.Undo()) { SetMessage("Nothing to undo."); return; }
+        RenderRecord();
+        UpdateSidebarItem(_currentDoc);
+        SetMessage(_currentDoc.CanUndo ? "Undo." : "Undo — nothing more to undo.");
+    }
+
+    private void RedoEdit()
+    {
+        if (_currentDoc is null) { SetMessage("No record on screen."); return; }
+        _viewer.EndEdit();
+        if (!_currentDoc.Redo()) { SetMessage("Nothing to redo."); return; }
+        RenderRecord();
+        UpdateSidebarItem(_currentDoc);
+        SetMessage("Redo.");
+    }
 
     /// <summary>The field/subfield the cursor is on, in model indices.</summary>
     private (int FieldIndex, int SubfieldIndex)? CurrentRef() =>
