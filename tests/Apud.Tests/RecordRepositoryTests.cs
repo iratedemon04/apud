@@ -22,6 +22,7 @@ public class RecordRepositoryTests : IDisposable
         "=040  \\\\$aMX-MxBAC$bspa$erda\n" +
         "=100  1\\$aMoreno, Matías$eautor\n" +
         "=245  10$aGrandes proyectos científicos: Sincrotrón\n" +
+        "=264  \\1$aMéxico$bEl Colegio Nacional$c2017\n" +
         "=650  \\4$aFísica nuclear$xInvestigación$xMéxico\n" +
         "=650  \\4$aSincrotrón\n" +
         "=852  2\\$eBúfalo\n";
@@ -146,21 +147,26 @@ public class RecordRepositoryTests : IDisposable
         Assert.Equal(new[] { "2", "10" }, list.Select(s => s.ControlNumber).ToArray());
         Assert.StartsWith("Otros proyectos", list[0].Title);
         Assert.Equal("Moreno, Matías", list[0].Author); // 100, first subfield
-        Assert.Equal("2017", list[0].Year);             // 008 Date 1
+        Assert.Equal("2017", list[0].Year);             // 264 $c "as written"
     }
 
     [Fact]
-    public void List_year_falls_back_to_publication_field_when_008_has_no_date()
+    public void List_year_comes_from_the_publication_field_never_the_008()
     {
+        // Record 177's 008 held "[1960]" stuffed into its 4-char date slot and
+        // showed as "[196"; the 264 $c has the real "[1960]". The displayed year
+        // is the transcription, even when the 008 carries its own (here different)
+        // date — the coded field is never consulted (user, 2026-07-31).
         var rec = Parse(
             "=LDR  00000nam a2200000 i 4500\n" +
-            "=245  10$aSin fecha en 008\n" +
-            "=260  \\\\$aMéxico :$bEl Colegio,$c1998.\n" +
+            "=008  260415s1955    mx            000 0 spa d\n" + // 008 says 1955
+            "=245  10$aFecha entre corchetes\n" +
+            "=264  \\1$aMéxico :$bEl Colegio,$c[1960]\n" +       // $c says [1960]
             "=700  1\\$aPaz, Octavio\n");
         Repo.Insert(new StoredRecord("BIB", rec));
 
         var row = Repo.List("BIB").Single();
-        Assert.Equal("1998.", row.Year);          // 260 $c shown as written
+        Assert.Equal("[1960]", row.Year);         // the $c wins, brackets and all
         Assert.Equal("Paz, Octavio", row.Author); // no 1XX → first 7XX
     }
 

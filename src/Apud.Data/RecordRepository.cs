@@ -211,7 +211,9 @@ public sealed class RecordRepository
         using var cmd = _db.Connection.CreateCommand();
         // Title for the list pane: 245$a for BIB; 1XX first subfield works for both bases.
         // Author: 100/110/111 heading, falling back to the first 700/710/711.
-        // Year: 008 date bytes, else 260/264 $c — extracted in code below.
+        // Year: the 260/264 $c transcription only — never the coded 008 date
+        // (real catalogues stuff brackets and fill characters into its 4-char
+        // slot, so the human-entered field is the one to trust). See YearOf.
         cmd.CommandText = """
             SELECT r.id, r.base, r.control_number, r.status, r.updated_utc,
                    (SELECT f.content FROM field f
@@ -220,8 +222,6 @@ public sealed class RecordRepository
                    (SELECT f.content FROM field f
                      WHERE f.record_id = r.id AND f.tag IN ('100','110','111','700','710','711')
                      ORDER BY CASE WHEN f.tag LIKE '1__' THEN 0 ELSE 1 END, f.seq LIMIT 1),
-                   (SELECT f.content FROM field f
-                     WHERE f.record_id = r.id AND f.tag = '008' ORDER BY f.seq LIMIT 1),
                    (SELECT f.content FROM field f
                      WHERE f.record_id = r.id AND f.tag IN ('260','264') ORDER BY f.seq LIMIT 1)
             FROM record r WHERE r.base = $base
@@ -233,8 +233,7 @@ public sealed class RecordRepository
         {
             string title = r.IsDBNull(5) ? "" : FirstSubfieldValue(r.GetString(5));
             string author = r.IsDBNull(6) ? "" : FirstSubfieldValue(r.GetString(6));
-            string year = YearOf(r.IsDBNull(7) ? null : r.GetString(7),
-                                 r.IsDBNull(8) ? null : r.GetString(8));
+            string year = YearOf(r.IsDBNull(7) ? null : r.GetString(7));
             list.Add(new RecordSummary(
                 r.GetInt64(0), r.GetString(1),
                 r.IsDBNull(2) ? null : r.GetString(2),
@@ -398,18 +397,19 @@ public sealed class RecordRepository
     /// (partial dates like "19uu" are real data — shown as-is); otherwise the
     /// 260/264 $c publication date. Empty when the record has neither.
     /// </summary>
-    private static string YearOf(string? f008, string? packedPub)
+    /// <summary>
+    /// Year for the list, taken from the record's own transcribed data — the
+    /// 260/264 $c "as written" (e.g. "[1960]"). The coded 008 date is deliberately
+    /// NOT consulted: in real catalogues its fixed 4-character slot gets brackets
+    /// and fill characters typed into it (record 177's 008 held "[1960]", which
+    /// showed as "[196"), so the human-entered publication date is the only one
+    /// trustworthy on screen (user, 2026-07-31).
+    /// </summary>
+    private static string YearOf(string? packedPub)
     {
-        if (f008 is { Length: >= 11 })
-        {
-            string date1 = f008.Substring(7, 4).Trim(' ', '\\', '|');
-            if (date1.Length > 0) return date1;
-        }
         if (packedPub != null)
-        {
             foreach (var chunk in packedPub.Split(MarcConstants.SubfieldDelimiter, StringSplitOptions.RemoveEmptyEntries))
-                if (chunk[0] == 'c') return chunk.Substring(1).Trim();
-        }
+                if (chunk.Length > 0 && chunk[0] == 'c') return chunk.Substring(1).Trim();
         return "";
     }
 
