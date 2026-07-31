@@ -44,11 +44,17 @@ public sealed class MainForm : Form
         ("Control No.", SearchScope.ControlNumber),
     };
 
+    private readonly CommandRegistry _commands = new();
+    private readonly Keymap _keymap;
+
     private ApudDatabase? _db;
     private RecordRepository? _repo;
     private bool _syncingBase;
 
     private string CurrentBase => _searchBase.SelectedIndex == 1 ? "AUT" : "BIB";
+
+    private CommandContext ActiveContext =>
+        _recordView.Visible ? CommandContext.Editor : CommandContext.Search;
 
     public MainForm()
     {
@@ -56,39 +62,44 @@ public sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(950, 620);
 
-        // ----- menu -----
+        // ----- command table (Module 6 step 1) -----
+        // Menus render from this table and keymap.json binds against it.
+        // Catalogue commands are menu-only (§6.2: record commands own the keyboard).
+        _commands.Add(new Command { Id = "catalogue.new", Name = "&New Catalogue...", Execute = NewCatalog });
+        _commands.Add(new Command { Id = "catalogue.open", Name = "&Open Catalogue...", Execute = OpenCatalogDialog });
+        _commands.Add(new Command { Id = "catalogue.import-folder", Name = "&Import Folder...", Execute = ImportFolder });
+        _commands.Add(new Command { Id = "catalogue.export-base", Name = "Export &Base...", Execute = ExportBase });
+        _commands.Add(new Command { Id = "catalogue.export-selected", Name = "Export &Selected...", Execute = ExportSelected });
+        _commands.Add(new Command { Id = "app.exit", Name = "E&xit", DefaultKey = "Alt+F4", Execute = Close });
+        _commands.Add(new Command { Id = "base.bib", Name = "&BIB — Bibliographic", Execute = () => SetBase("BIB") });
+        _commands.Add(new Command { Id = "base.aut", Name = "&AUT — Authority", Execute = () => SetBase("AUT") });
+        _commands.Add(new Command { Id = "search.focus", Name = "&Search", DefaultKey = "F2", Execute = ShowSearchView });
+        _commands.Add(new Command { Id = "help.about", Name = "&About Apud", Execute = ShowAbout });
+
+        _keymap = Keymap.LoadFile(_commands, Path.Combine(AppContext.BaseDirectory, Keymap.FileName));
+
+        // ----- menu (rendered from the command table) -----
         _menu = new MenuStrip();
 
         var file = new ToolStripMenuItem("&File");
-        file.DropDownItems.Add(new ToolStripMenuItem("&New Catalogue...", null, (_, _) => NewCatalog())
-        {
-            ShortcutKeys = Keys.Control | Keys.N
-        });
-        file.DropDownItems.Add(new ToolStripMenuItem("&Open Catalogue...", null, (_, _) => OpenCatalogDialog())
-        {
-            ShortcutKeys = Keys.Control | Keys.O
-        });
+        file.DropDownItems.Add(MenuItem("catalogue.new"));
+        file.DropDownItems.Add(MenuItem("catalogue.open"));
         file.DropDownItems.Add(new ToolStripSeparator());
-        file.DropDownItems.Add(new ToolStripMenuItem("&Import Folder...", null, (_, _) => ImportFolder()));
-        file.DropDownItems.Add(new ToolStripMenuItem("Export &Base...", null, (_, _) => ExportBase()));
-        file.DropDownItems.Add(new ToolStripMenuItem("Export &Selected...", null, (_, _) => ExportSelected()));
+        file.DropDownItems.Add(MenuItem("catalogue.import-folder"));
+        file.DropDownItems.Add(MenuItem("catalogue.export-base"));
+        file.DropDownItems.Add(MenuItem("catalogue.export-selected"));
         file.DropDownItems.Add(new ToolStripSeparator());
-        file.DropDownItems.Add(new ToolStripMenuItem("E&xit", null, (_, _) => Close())
-        {
-            ShortcutKeys = Keys.Alt | Keys.F4
-        });
+        file.DropDownItems.Add(MenuItem("app.exit"));
 
         var @base = new ToolStripMenuItem("&Base");
-        _bibItem = new ToolStripMenuItem("&BIB — Bibliographic", null, (_, _) => SetBase("BIB")) { Checked = true };
-        _autItem = new ToolStripMenuItem("&AUT — Authority", null, (_, _) => SetBase("AUT"));
+        _bibItem = MenuItem("base.bib");
+        _bibItem.Checked = true;
+        _autItem = MenuItem("base.aut");
         @base.DropDownItems.Add(_bibItem);
         @base.DropDownItems.Add(_autItem);
 
         var help = new ToolStripMenuItem("&Help");
-        help.DropDownItems.Add(new ToolStripMenuItem("&About Apud", null, (_, _) =>
-            MessageBox.Show(this,
-                $"Apud {Application.ProductVersion}\nMARC21 original cataloguing.",
-                "About Apud", MessageBoxButtons.OK, MessageBoxIcon.Information)));
+        help.DropDownItems.Add(MenuItem("help.about"));
 
         _menu.Items.Add(file);
         _menu.Items.Add(@base);
@@ -301,10 +312,63 @@ public sealed class MainForm : Form
         // to a previous catalogue, remembers nothing between sessions, and creates
         // nothing on its own — cataloguers must consciously choose the database
         // every session, exactly like Aleph's Connect to...
-        string? tagNamesReport = TagNames.LoadFile(Path.Combine(AppContext.BaseDirectory, TagNames.FileName));
-        Load += (_, _) => SetMessage(tagNamesReport
-            ?? "No catalogue open — File → New Catalogue or Open Catalogue.");
+        var configReports = new List<string>();
+        if (TagNames.LoadFile(Path.Combine(AppContext.BaseDirectory, TagNames.FileName)) is string tagNamesReport)
+            configReports.Add(tagNamesReport);
+        configReports.AddRange(_keymap.Diagnostics);
+        Load += (_, _) => SetMessage(configReports.Count > 0
+            ? string.Join("  |  ", configReports)
+            : "No catalogue open — File → New Catalogue or Open Catalogue.");
         FormClosed += (_, _) => _db?.Dispose();
+    }
+
+    /// <summary>Menu item for a command: text, handler and shortcut display all
+    /// come from the one table entry, so they can never disagree.</summary>
+    private ToolStripMenuItem MenuItem(string commandId)
+    {
+        var cmd = _commands.Find(commandId)
+            ?? throw new InvalidOperationException($"Menu references unregistered command {commandId}.");
+        var item = new ToolStripMenuItem(cmd.Name, null, (_, _) => cmd.Execute());
+        if (_keymap.BindingFor(commandId) is string chord)
+            item.ShortcutKeyDisplayString = chord;
+        return item;
+    }
+
+    private void ShowAbout() =>
+        MessageBox.Show(this,
+            $"Apud {Application.ProductVersion}\nMARC21 original cataloguing.",
+            "About Apud", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+    /// <summary>Keymap dispatch through the framework's shortcut hook. Keys land
+    /// here before the focused control; chords the keymap doesn't claim follow
+    /// the normal WinForms path.</summary>
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (ShouldDispatch(keyData) && _keymap.Lookup(keyData, ActiveContext) is string id)
+        {
+            _commands.Find(id)!.Execute();
+            return true;
+        }
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
+
+    /// <summary>While the cursor is in a text control, only modified chords and
+    /// F-keys dispatch — a plain letter, digit, Del or Enter is typing, not a
+    /// command (documented in keymap.json's header).</summary>
+    private bool ShouldDispatch(Keys keyData)
+    {
+        if ((keyData & (Keys.Control | Keys.Alt)) != 0) return true;
+        var code = keyData & Keys.KeyCode;
+        if (code is >= Keys.F1 and <= Keys.F24) return true;
+        return FocusedControl() is not (TextBoxBase or ComboBox);
+    }
+
+    private Control? FocusedControl()
+    {
+        Control? c = ActiveControl;
+        while (c is ContainerControl container && container.ActiveControl != null)
+            c = container.ActiveControl;
+        return c;
     }
 
     private static DataGridViewTextBoxColumn NewColumn(

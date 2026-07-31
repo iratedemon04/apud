@@ -1,0 +1,22 @@
+// Apud keymap — every keyboard shortcut, user-editable. Restart to apply.
+//
+// Format: "command-id": "chord".
+//   Chord = optional modifiers Ctrl, Alt, Shift joined with '+', then one key:
+//   A-Z, 0-9, F1-F24, Enter, Escape (Esc), Tab, Space, Delete (Del),
+//   Insert (Ins), Backspace, Home, End, PageUp (PgUp), PageDown (PgDn),
+//   Up, Down, Left, Right.   Examples: "Ctrl+L", "Shift+F6", "F2".
+// "" unbinds a command. A missing entry (or missing file) = built-in default.
+// A bad entry is reported in the message bar and the default kept — never a crash.
+// Plain unmodified letters/digits only fire while no text box has the cursor.
+//
+// Commands available today (the editor's commands arrive with Module 6 steps 3-6):
+//   catalogue.new, catalogue.open, catalogue.import-folder,
+//   catalogue.export-base, catalogue.export-selected   — menu-only by default
+//   base.bib, base.aut                                 — switch base
+//   search.focus  — go to the search screen, cursor in the search box
+//   help.about
+//   app.exit
+{
+  "search.focus": "F2",
+  "app.exit": "Alt+F4"
+}
