@@ -9,14 +9,22 @@
 // A bad entry is reported in the message bar and the default kept — never a crash.
 // Plain unmodified letters/digits only fire while no text box has the cursor.
 //
-// Commands available today (the editor's commands arrive with Module 6 steps 3-6):
+// Menu-only commands (bindable here if you want keys for them):
 //   catalogue.new, catalogue.open, catalogue.import-folder,
-//   catalogue.export-base, catalogue.export-selected   — menu-only by default
-//   base.bib, base.aut                                 — switch base
-//   search.focus  — go to the search screen, cursor in the search box
+//   catalogue.export-base, catalogue.export-selected, base.bib, base.aut,
 //   help.about
-//   app.exit
 {
   "search.focus": "F2",
+  "record.new": "Ctrl+N",
+  "record.save-draft": "Ctrl+S",
+  "record.save-template": "Ctrl+T",
+  "field.new": "F6",
+  "subfield.new": "F7",
+  "field.delete": "Ctrl+F5",
+  "subfield.delete": "Ctrl+F7",
+  "field.fixed-edit": "Ctrl+F3",
+  "field.validate": "Ctrl+F4",
+  "record.validate": "Ctrl+W",
+  "record.push": "Ctrl+L",
   "app.exit": "Alt+F4"
 }

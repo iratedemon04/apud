@@ -39,8 +39,9 @@ public class RecordDisplayTests
         var rows = RecordDisplay.Build(Parse(Monograph));
 
         var i650 = rows.ToList().FindIndex(r => r.Tag == "650");
-        Assert.Equal(new DisplayRow("Subject--Topical", "650", "_4", "a", "Física nuclear"), rows[i650]);
-        Assert.Equal(new DisplayRow("", "", "", "x", "Investigación"), rows[i650 + 1]);
+        // 650 is the 5th field (001, 008, 100, 245, 650) → FieldIndex 4.
+        Assert.Equal(new DisplayRow("Subject--Topical", "650", "_4", "a", "Física nuclear", 4, 0), rows[i650]);
+        Assert.Equal(new DisplayRow("", "", "", "x", "Investigación", 4, 1), rows[i650 + 1]);
     }
 
     [Fact]

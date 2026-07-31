@@ -181,13 +181,23 @@ public class KeymapTests
     [Fact]
     public void Shipped_keymap_file_parses_clean()
     {
-        var registry = Registry(Cmd("search.focus", "F2"), Cmd("app.exit", "Alt+F4"));
+        // Every command id the shipped keymap.json binds must be a real command,
+        // and its chords must not collide — this is what "parses clean" means.
+        var registry = Registry(
+            Cmd("search.focus"), Cmd("record.new"), Cmd("record.save-draft", context: CommandContext.Editor),
+            Cmd("record.save-template", context: CommandContext.Editor),
+            Cmd("field.new", context: CommandContext.Editor), Cmd("subfield.new", context: CommandContext.Editor),
+            Cmd("field.delete", context: CommandContext.Editor), Cmd("subfield.delete", context: CommandContext.Editor),
+            Cmd("field.fixed-edit", context: CommandContext.Editor), Cmd("field.validate", context: CommandContext.Editor),
+            Cmd("record.validate", context: CommandContext.Editor), Cmd("record.push", context: CommandContext.Editor),
+            Cmd("app.exit"));
         string shipped = Path.Combine(AppContext.BaseDirectory, Keymap.FileName);
 
         Assert.True(File.Exists(shipped), $"expected {Keymap.FileName} copied to test output");
         var keymap = Keymap.LoadFile(registry, shipped);
         Assert.Empty(keymap.Diagnostics);
         Assert.Equal("search.focus", keymap.Lookup(Keys.F2, CommandContext.Search));
+        Assert.Equal("record.push", keymap.Lookup(Keys.Control | Keys.L, CommandContext.Editor));
     }
 
     [Fact]

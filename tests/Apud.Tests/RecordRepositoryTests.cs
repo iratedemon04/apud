@@ -65,6 +65,31 @@ public class RecordRepositoryTests : IDisposable
     }
 
     [Fact]
+    public void SaveDraft_inserts_a_new_record_out_of_search()
+    {
+        var stored = new StoredRecord("BIB", Parse(Monograph)) { Status = RecordStatus.Pushed };
+        Repo.SaveDraft(stored); // Ctrl+S on a brand-new record
+
+        Assert.NotEqual(0, stored.Id);
+        Assert.Equal(RecordStatus.Draft, stored.Status);
+        Assert.Equal(RecordStatus.Draft, Repo.Load(stored.Id)!.Status);
+        Assert.DoesNotContain(stored.Id, Repo.Search("BIB", "sincrotron")); // drafts are invisible
+    }
+
+    [Fact]
+    public void SaveDraft_demotes_a_pushed_record_and_pulls_it_from_search()
+    {
+        var stored = new StoredRecord("BIB", Parse(Monograph)) { Status = RecordStatus.Pushed };
+        Repo.Insert(stored);
+        Assert.Contains(stored.Id, Repo.Search("BIB", "sincrotron")); // pushed → searchable
+
+        Repo.SaveDraft(stored); // editing then Ctrl+S demotes until re-pushed
+
+        Assert.Equal(RecordStatus.Draft, Repo.Load(stored.Id)!.Status);
+        Assert.DoesNotContain(stored.Id, Repo.Search("BIB", "sincrotron"));
+    }
+
+    [Fact]
     public void Deleting_a_record_cascades_fields_and_links()
     {
         var stored = new StoredRecord("BIB", Parse(Monograph));

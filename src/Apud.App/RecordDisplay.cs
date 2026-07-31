@@ -3,8 +3,12 @@ using Marc.Core;
 namespace Apud.App;
 
 /// <summary>One grid row of the record viewer. Data-field continuation rows
-/// (second and later subfields) carry only Code + Value.</summary>
-public sealed record DisplayRow(string FieldName, string Tag, string Indicators, string Code, string Value);
+/// (second and later subfields) carry only Code + Value. FieldIndex/SubfieldIndex
+/// point back into the MarcRecord for the editor: FieldIndex -1 = leader row;
+/// SubfieldIndex -1 = a row with no subfield (LDR, control field, or an empty
+/// data field).</summary>
+public sealed record DisplayRow(string FieldName, string Tag, string Indicators, string Code, string Value,
+    int FieldIndex = -1, int SubfieldIndex = -1);
 
 /// <summary>
 /// Turns a MarcRecord into viewer rows, following the user's Aleph layout
@@ -23,11 +27,12 @@ public static class RecordDisplay
             new(TagNames.For("LDR"), "LDR", "", "", Caret(record.Leader)),
         };
 
-        foreach (var f in record.Fields)
+        for (int fi = 0; fi < record.Fields.Count; fi++)
         {
+            var f = record.Fields[fi];
             if (f.IsControl)
             {
-                rows.Add(new DisplayRow(TagNames.For(f.Tag), f.Tag, "", "", Caret(f.ControlData ?? "")));
+                rows.Add(new DisplayRow(TagNames.For(f.Tag), f.Tag, "", "", Caret(f.ControlData ?? ""), fi));
                 continue;
             }
 
@@ -39,7 +44,7 @@ public static class RecordDisplay
 
             if (f.Subfields.Count == 0)
             {
-                rows.Add(new DisplayRow(TagNames.For(f.Tag), f.Tag, ind, "", ""));
+                rows.Add(new DisplayRow(TagNames.For(f.Tag), f.Tag, ind, "", "", fi));
                 continue;
             }
 
@@ -47,8 +52,8 @@ public static class RecordDisplay
             {
                 var s = f.Subfields[i];
                 rows.Add(i == 0
-                    ? new DisplayRow(TagNames.For(f.Tag), f.Tag, ind, s.Code.ToString(), s.Value)
-                    : new DisplayRow("", "", "", s.Code.ToString(), s.Value));
+                    ? new DisplayRow(TagNames.For(f.Tag), f.Tag, ind, s.Code.ToString(), s.Value, fi, i)
+                    : new DisplayRow("", "", "", s.Code.ToString(), s.Value, fi, i));
             }
         }
 

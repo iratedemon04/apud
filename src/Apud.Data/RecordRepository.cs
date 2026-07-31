@@ -96,6 +96,18 @@ public sealed class RecordRepository
         rec.UpdatedUtc = now;
     }
 
+    /// <summary>
+    /// Ctrl+S (Module 6): writes the record as a DRAFT — drafts are invisible
+    /// to search and must earn their pushed status through Ctrl+L (Module 9),
+    /// so editing a pushed record and saving demotes it until re-pushed. The
+    /// status change lives here because status is the data layer's invariant.
+    /// </summary>
+    public void SaveDraft(StoredRecord rec)
+    {
+        rec.Status = RecordStatus.Draft;
+        if (rec.Id == 0) Insert(rec); else Update(rec);
+    }
+
     private bool WasPushed(SqliteTransaction tx, long id)
     {
         using var cmd = _db.Connection.CreateCommand();
