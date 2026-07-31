@@ -1,0 +1,49 @@
+{
+  "field": "008",
+  "material": "VM",
+  "length": 40,
+  "positions": [
+    { "off": 0, "len": 6, "name": "Date entered on file", "auto": "yymmdd" },
+    { "off": 6, "len": 1, "name": "Type of date / Publication status", "values": {
+      "b": "No dates given; B.C. date involved", "c": "Continuing resource currently published",
+      "d": "Continuing resource ceased publication", "e": "Detailed date",
+      "i": "Inclusive dates of collection", "k": "Range of years of bulk of collection",
+      "m": "Multiple dates", "n": "Dates unknown", "p": "Distribution date differs from production",
+      "q": "Questionable date", "r": "Reprint/reissue and original date", "s": "Single known date",
+      "t": "Publication and copyright dates", "u": "Continuing resource status unknown" } },
+    { "off": 7, "len": 4, "name": "Date 1" },
+    { "off": 11, "len": 4, "name": "Date 2" },
+    { "off": 15, "len": 3, "name": "Place of publication", "lookup": "marc-countries" },
+    { "off": 18, "len": 3, "name": "Running time for motion pictures and videorecordings" },
+    { "off": 21, "len": 1, "name": "Undefined", "protected": true },
+    { "off": 22, "len": 1, "name": "Target audience", "values": {
+      " ": "Unknown or not specified", "a": "Preschool", "b": "Primary", "c": "Pre-adolescent",
+      "d": "Adolescent", "e": "Adult", "f": "Specialized", "g": "General", "j": "Juvenile" } },
+    { "off": 23, "len": 5, "name": "Undefined", "protected": true },
+    { "off": 28, "len": 1, "name": "Government publication", "values": {
+      " ": "Not a government publication", "a": "Autonomous or semi-autonomous", "c": "Multilocal",
+      "f": "Federal/national", "i": "International intergovernmental", "l": "Local", "m": "Multistate",
+      "o": "Government, level undetermined", "s": "State/provincial/territorial", "u": "Unknown",
+      "z": "Other" } },
+    { "off": 29, "len": 1, "name": "Form of item", "values": {
+      " ": "None of the following", "a": "Microfilm", "b": "Microfiche", "c": "Microopaque",
+      "d": "Large print", "f": "Braille", "o": "Online", "q": "Direct electronic",
+      "r": "Regular print reproduction", "s": "Electronic" } },
+    { "off": 30, "len": 3, "name": "Undefined", "protected": true },
+    { "off": 33, "len": 1, "name": "Type of visual material", "values": {
+      "a": "Art original", "b": "Kit", "c": "Art reproduction", "d": "Diorama", "f": "Filmstrip",
+      "g": "Game", "i": "Picture", "k": "Graphic", "l": "Technical drawing", "m": "Motion picture",
+      "n": "Chart", "o": "Flash card", "p": "Microscope slide", "q": "Model", "r": "Realia",
+      "s": "Slide", "t": "Transparency", "v": "Videorecording", "w": "Toy", "z": "Other" } },
+    { "off": 34, "len": 1, "name": "Technique", "values": {
+      "a": "Animation", "c": "Animation and live action", "l": "Live action", "n": "Not applicable",
+      "u": "Unknown", "z": "Other" } },
+    { "off": 35, "len": 3, "name": "Language", "lookup": "marc-languages" },
+    { "off": 38, "len": 1, "name": "Modified record", "values": {
+      " ": "Not modified", "d": "Dashed-on information omitted", "o": "Completely romanized",
+      "r": "Romanized, printed cards in script", "s": "Shortened", "x": "Missing characters" } },
+    { "off": 39, "len": 1, "name": "Cataloging source", "values": {
+      " ": "National bibliographic agency", "c": "Cooperative cataloging program", "d": "Other",
+      "u": "Unknown" } }
+  ]
+}

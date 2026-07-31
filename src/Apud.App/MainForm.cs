@@ -1,4 +1,5 @@
 using Apud.Data;
+using Marc.Core.FixedFields;
 
 namespace Apud.App;
 
@@ -88,7 +89,7 @@ public sealed class MainForm : Form
         _commands.Add(new Command { Id = "field.delete", Name = "&Delete Field", Context = CommandContext.Editor, DefaultKey = "Ctrl+F5", Execute = DeleteCurrentField });
         _commands.Add(new Command { Id = "subfield.delete", Name = "Delete Subf&ield", Context = CommandContext.Editor, DefaultKey = "Ctrl+F7", Execute = DeleteCurrentSubfield });
         // Stubs wired, not built — keys rebindable from day one (step 7).
-        _commands.Add(new Command { Id = "field.fixed-edit", Name = "Edit Fixed Field by &Position...", Context = CommandContext.Editor, DefaultKey = "Ctrl+F3", Execute = () => SetMessage("Position-by-position editing arrives in Module 7.") });
+        _commands.Add(new Command { Id = "field.fixed-edit", Name = "Edit Fixed Field by &Position...", Context = CommandContext.Editor, DefaultKey = "Ctrl+F3", Execute = EditFixedField });
         _commands.Add(new Command { Id = "field.validate", Name = "&Validate Field / Browse Headings", Context = CommandContext.Editor, DefaultKey = "Ctrl+F4", Execute = () => SetMessage("Field validation and heading browse arrive in Module 8.") });
         _commands.Add(new Command { Id = "record.validate", Name = "Validate &Record", Context = CommandContext.Editor, DefaultKey = "Ctrl+W", Execute = () => SetMessage("Validation arrives in Module 9.") });
         _commands.Add(new Command { Id = "record.push", Name = "Validate && &Push", Context = CommandContext.Editor, DefaultKey = "Ctrl+L", Execute = () => SetMessage("Validate + push arrives in Module 9.") });
@@ -903,6 +904,60 @@ public sealed class MainForm : Form
         RenderRecord();
         int left = _currentDoc.Record.Fields[at.FieldIndex].Subfields.Count;
         SelectCell(at.FieldIndex, left == 0 ? -1 : Math.Min(at.SubfieldIndex, left - 1), "code");
+    }
+
+    // ---------- fixed-field position editor (Module 7) ----------
+
+    /// <summary>Ctrl+F3: edit the leader or an 008 byte-by-byte through the
+    /// position dialog. The target is whatever the caret stands on; the write
+    /// goes back through EditorDocument (SetLeader/SetControlData) so it lands on
+    /// the undo stack like any other edit. §6.2: this is the fixed-field editor
+    /// the user asked for — "on LDR/008, open its data by position."</summary>
+    private void EditFixedField()
+    {
+        if (_currentDoc is null) { SetMessage("No record on screen."); return; }
+        _viewer.EndEdit();
+        if (CurrentRef() is not { } at) { SetMessage("Stand on the leader or an 008 field first."); return; }
+        var doc = _currentDoc;
+
+        FixedFieldLayout? layout;
+        string current, title;
+        Action<string> writeBack;
+
+        if (at.FieldIndex < 0) // leader row
+        {
+            layout = FixedFieldLayouts.Leader(doc.Record.Leader);
+            current = doc.Record.Leader;
+            title = "Leader — edit by position";
+            writeBack = text => { if (doc.SetLeader(text) is string err) SetMessage(err); };
+        }
+        else
+        {
+            var field = doc.Record.Fields[at.FieldIndex];
+            if (field.Tag != "008")
+            {
+                SetMessage(field.IsControl
+                    ? $"Ctrl+F3 maps the leader and 008. {field.Tag} is a plain control field — type its value directly."
+                    : "Ctrl+F3 edits fixed fields — stand on the leader or the 008.");
+                return;
+            }
+            layout = FixedFieldLayouts.For008(doc.Record.Leader);
+            current = field.ControlData ?? "";
+            title = $"008 — {FixedFieldLayouts.Material008(doc.Record.Leader)} — edit by position";
+            int fieldIndex = at.FieldIndex;
+            writeBack = text => doc.SetControlData(fieldIndex, text);
+        }
+
+        if (layout is null) { SetMessage("No fixed-field layout is available for this record type."); return; }
+
+        using var form = new FixedFieldForm(title, layout, current);
+        if (form.ShowDialog(this) != DialogResult.OK) return;
+
+        writeBack(form.Result!);
+        RenderRecord();
+        UpdateSidebarItem(doc);
+        SelectCell(at.FieldIndex, -1, "value");
+        SetMessage($"{(at.FieldIndex < 0 ? "Leader" : "008")} updated by position.");
     }
 
     // ---------- new record / save (Module 6 steps 4-6) ----------

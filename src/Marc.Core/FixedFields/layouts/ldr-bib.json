@@ -1,0 +1,38 @@
+{
+  "field": "LDR",
+  "material": "bib",
+  "length": 24,
+  "positions": [
+    { "off": 0, "len": 5, "name": "Record length", "protected": true },
+    { "off": 5, "len": 1, "name": "Record status", "values": {
+      "a": "Increase in encoding level", "c": "Corrected or revised",
+      "d": "Deleted", "n": "New", "p": "Increase in encoding level from prepublication" } },
+    { "off": 6, "len": 1, "name": "Type of record", "values": {
+      "a": "Language material", "c": "Notated music", "d": "Manuscript notated music",
+      "e": "Cartographic material", "f": "Manuscript cartographic material",
+      "g": "Projected medium", "i": "Nonmusical sound recording", "j": "Musical sound recording",
+      "k": "Two-dimensional nonprojectable graphic", "m": "Computer file", "o": "Kit",
+      "p": "Mixed materials", "r": "Three-dimensional artifact", "t": "Manuscript language material" } },
+    { "off": 7, "len": 1, "name": "Bibliographic level", "values": {
+      "a": "Monographic component part", "b": "Serial component part", "c": "Collection",
+      "d": "Subunit", "i": "Integrating resource", "m": "Monograph/item", "s": "Serial" } },
+    { "off": 8, "len": 1, "name": "Type of control", "values": {
+      " ": "No specified type", "a": "Archival" } },
+    { "off": 9, "len": 1, "name": "Character coding scheme", "values": {
+      " ": "MARC-8", "a": "UCS/Unicode" } },
+    { "off": 10, "len": 1, "name": "Indicator count", "protected": true },
+    { "off": 11, "len": 1, "name": "Subfield code count", "protected": true },
+    { "off": 12, "len": 5, "name": "Base address of data", "protected": true },
+    { "off": 17, "len": 1, "name": "Encoding level", "values": {
+      " ": "Full level", "1": "Full level, material not examined", "2": "Less-than-full, not examined",
+      "3": "Abbreviated level", "4": "Core level", "5": "Preliminary level",
+      "7": "Minimal level", "8": "Prepublication level", "u": "Unknown", "z": "Not applicable" } },
+    { "off": 18, "len": 1, "name": "Descriptive cataloging form", "values": {
+      " ": "Non-ISBD", "a": "AACR 2", "c": "ISBD punctuation omitted", "i": "ISBD punctuation included",
+      "n": "Non-ISBD punctuation omitted", "u": "Unknown" } },
+    { "off": 19, "len": 1, "name": "Multipart resource record level", "values": {
+      " ": "Not specified or not applicable", "a": "Set", "b": "Part with independent title",
+      "c": "Part with dependent title" } },
+    { "off": 20, "len": 4, "name": "Entry map", "protected": true }
+  ]
+}

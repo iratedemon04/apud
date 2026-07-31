@@ -1,0 +1,68 @@
+{
+  "field": "008",
+  "material": "authority",
+  "length": 40,
+  "positions": [
+    { "off": 0, "len": 6, "name": "Date entered on file", "auto": "yymmdd" },
+    { "off": 6, "len": 1, "name": "Direct or indirect geographic subdivision", "values": {
+      " ": "Not subdivided geographically", "d": "Subdivided geographically—direct",
+      "i": "Subdivided geographically—indirect", "n": "Not applicable" } },
+    { "off": 7, "len": 1, "name": "Romanization scheme", "values": {
+      "a": "International standard", "b": "National standard",
+      "c": "National library association standard", "d": "National library/bibliographic agency standard",
+      "e": "Local standard", "f": "Standard of unknown origin", "g": "Conventional romanization",
+      "n": "Not applicable" } },
+    { "off": 8, "len": 1, "name": "Language of catalog", "values": {
+      " ": "No information provided", "b": "English and French", "e": "English only",
+      "f": "French only" } },
+    { "off": 9, "len": 1, "name": "Kind of record", "values": {
+      "a": "Established heading", "b": "Untraced reference", "c": "Traced reference",
+      "d": "Subdivision", "e": "Node label", "f": "Established heading and subdivision",
+      "g": "Reference and subdivision" } },
+    { "off": 10, "len": 1, "name": "Descriptive cataloging rules", "values": {
+      "a": "Earlier rules", "b": "AACR 1", "c": "AACR 2", "d": "AACR 2 compatible",
+      "n": "Not applicable", "z": "Other" } },
+    { "off": 11, "len": 1, "name": "Subject heading system / thesaurus", "values": {
+      "a": "Library of Congress Subject Headings", "b": "LC for children's literature",
+      "c": "Medical Subject Headings", "d": "National Agricultural Library subject authority file",
+      "k": "Canadian Subject Headings", "n": "Not applicable", "r": "Art and Architecture Thesaurus",
+      "s": "Sears List of Subject Headings", "v": "Répertoire de vedettes-matière", "z": "Other" } },
+    { "off": 12, "len": 1, "name": "Type of series", "values": {
+      "a": "Monographic series", "b": "Multipart item", "c": "Series-like phrase",
+      "n": "Not applicable", "z": "Other" } },
+    { "off": 13, "len": 1, "name": "Numbered or unnumbered series", "values": {
+      "a": "Numbered", "b": "Unnumbered", "c": "Numbering varies", "n": "Not applicable" } },
+    { "off": 14, "len": 1, "name": "Heading use — main or added entry", "values": {
+      "a": "Appropriate", "b": "Not appropriate" } },
+    { "off": 15, "len": 1, "name": "Heading use — subject added entry", "values": {
+      "a": "Appropriate", "b": "Not appropriate" } },
+    { "off": 16, "len": 1, "name": "Heading use — series added entry", "values": {
+      "a": "Appropriate", "b": "Not appropriate" } },
+    { "off": 17, "len": 1, "name": "Type of subject subdivision", "values": {
+      "a": "Topical", "b": "Form", "c": "Chronological", "d": "Geographic", "e": "Language",
+      "n": "Not applicable" } },
+    { "off": 18, "len": 10, "name": "Undefined", "protected": true },
+    { "off": 28, "len": 1, "name": "Type of government agency", "values": {
+      " ": "Not a government agency", "a": "Autonomous or semi-autonomous", "c": "Multilocal",
+      "f": "Federal/national", "i": "International intergovernmental", "l": "Local", "m": "Multistate",
+      "o": "Government, level undetermined", "s": "State/provincial/territorial", "u": "Unknown",
+      "z": "Other" } },
+    { "off": 29, "len": 1, "name": "Reference evaluation", "values": {
+      "a": "Tracings are consistent with the heading", "b": "Tracings are not necessarily consistent",
+      "n": "Not applicable" } },
+    { "off": 30, "len": 1, "name": "Undefined", "protected": true },
+    { "off": 31, "len": 1, "name": "Record update in process", "values": {
+      "a": "Record can be used", "b": "Record is being updated" } },
+    { "off": 32, "len": 1, "name": "Undifferentiated personal name", "values": {
+      "a": "Differentiated personal name", "b": "Undifferentiated personal name", "n": "Not applicable" } },
+    { "off": 33, "len": 1, "name": "Level of establishment", "values": {
+      "a": "Fully established", "b": "Memorandum", "c": "Provisional", "d": "Preliminary",
+      "n": "Not applicable" } },
+    { "off": 34, "len": 4, "name": "Undefined", "protected": true },
+    { "off": 38, "len": 1, "name": "Modified record", "values": {
+      " ": "Not modified", "s": "Shortened", "x": "Missing characters" } },
+    { "off": 39, "len": 1, "name": "Cataloging source", "values": {
+      " ": "National bibliographic agency", "c": "Cooperative cataloging program", "d": "Other",
+      "u": "Unknown" } }
+  ]
+}

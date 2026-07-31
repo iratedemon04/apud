@@ -1,0 +1,27 @@
+{
+  "field": "LDR",
+  "material": "authority",
+  "length": 24,
+  "positions": [
+    { "off": 0, "len": 5, "name": "Record length", "protected": true },
+    { "off": 5, "len": 1, "name": "Record status", "values": {
+      "a": "Increase in encoding level", "c": "Corrected or revised", "d": "Deleted",
+      "n": "New", "o": "Obsolete", "s": "Deleted; heading split into two or more records",
+      "x": "Deleted; heading replaced by another heading" } },
+    { "off": 6, "len": 1, "name": "Type of record", "values": { "z": "Authority data" }, "protected": true },
+    { "off": 7, "len": 1, "name": "Undefined", "protected": true },
+    { "off": 8, "len": 1, "name": "Undefined", "protected": true },
+    { "off": 9, "len": 1, "name": "Character coding scheme", "values": {
+      " ": "MARC-8", "a": "UCS/Unicode" } },
+    { "off": 10, "len": 1, "name": "Indicator count", "protected": true },
+    { "off": 11, "len": 1, "name": "Subfield code count", "protected": true },
+    { "off": 12, "len": 5, "name": "Base address of data", "protected": true },
+    { "off": 17, "len": 1, "name": "Encoding level", "values": {
+      "n": "Complete authority record", "o": "Incomplete authority record" } },
+    { "off": 18, "len": 1, "name": "Punctuation policy", "values": {
+      " ": "No information provided", "c": "Punctuation omitted", "i": "Punctuation included",
+      "u": "Unknown" } },
+    { "off": 19, "len": 1, "name": "Undefined", "protected": true },
+    { "off": 20, "len": 4, "name": "Entry map", "protected": true }
+  ]
+}

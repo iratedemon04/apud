@@ -6,4 +6,11 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Fixed-field byte maps are data, not code (PLAN §3.3): shipped inside the
+         assembly so there are no external files to lose, read by both the F-menu
+         dialog and (Module 9) the validator. -->
+    <EmbeddedResource Include="FixedFields\layouts\*.json" />
+  </ItemGroup>
+
 </Project>

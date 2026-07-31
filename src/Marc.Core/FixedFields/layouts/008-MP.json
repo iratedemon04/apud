@@ -1,0 +1,46 @@
+{
+  "field": "008",
+  "material": "MP",
+  "length": 40,
+  "positions": [
+    { "off": 0, "len": 6, "name": "Date entered on file", "auto": "yymmdd" },
+    { "off": 6, "len": 1, "name": "Type of date / Publication status", "values": {
+      "b": "No dates given; B.C. date involved", "c": "Continuing resource currently published",
+      "d": "Continuing resource ceased publication", "e": "Detailed date",
+      "i": "Inclusive dates of collection", "k": "Range of years of bulk of collection",
+      "m": "Multiple dates", "n": "Dates unknown", "p": "Distribution date differs from production",
+      "q": "Questionable date", "r": "Reprint/reissue and original date", "s": "Single known date",
+      "t": "Publication and copyright dates", "u": "Continuing resource status unknown" } },
+    { "off": 7, "len": 4, "name": "Date 1" },
+    { "off": 11, "len": 4, "name": "Date 2" },
+    { "off": 15, "len": 3, "name": "Place of publication", "lookup": "marc-countries" },
+    { "off": 18, "len": 4, "name": "Relief" },
+    { "off": 22, "len": 2, "name": "Projection" },
+    { "off": 24, "len": 1, "name": "Undefined", "protected": true },
+    { "off": 25, "len": 1, "name": "Type of cartographic material", "values": {
+      "a": "Single map", "b": "Map series", "c": "Map serial", "d": "Globe", "e": "Atlas",
+      "f": "Separate supplement to another work", "g": "Bound as part of another work",
+      "u": "Unknown", "z": "Other" } },
+    { "off": 26, "len": 2, "name": "Undefined", "protected": true },
+    { "off": 28, "len": 1, "name": "Government publication", "values": {
+      " ": "Not a government publication", "a": "Autonomous or semi-autonomous", "c": "Multilocal",
+      "f": "Federal/national", "i": "International intergovernmental", "l": "Local", "m": "Multistate",
+      "o": "Government, level undetermined", "s": "State/provincial/territorial", "u": "Unknown",
+      "z": "Other" } },
+    { "off": 29, "len": 1, "name": "Form of item", "values": {
+      " ": "None of the following", "a": "Microfilm", "b": "Microfiche", "c": "Microopaque",
+      "d": "Large print", "f": "Braille", "o": "Online", "q": "Direct electronic",
+      "r": "Regular print reproduction", "s": "Electronic" } },
+    { "off": 30, "len": 1, "name": "Undefined", "protected": true },
+    { "off": 31, "len": 1, "name": "Index", "values": { "0": "No index", "1": "Index present" } },
+    { "off": 32, "len": 1, "name": "Undefined", "protected": true },
+    { "off": 33, "len": 2, "name": "Special format characteristics" },
+    { "off": 35, "len": 3, "name": "Language", "lookup": "marc-languages" },
+    { "off": 38, "len": 1, "name": "Modified record", "values": {
+      " ": "Not modified", "d": "Dashed-on information omitted", "o": "Completely romanized",
+      "r": "Romanized, printed cards in script", "s": "Shortened", "x": "Missing characters" } },
+    { "off": 39, "len": 1, "name": "Cataloging source", "values": {
+      " ": "National bibliographic agency", "c": "Cooperative cataloging program", "d": "Other",
+      "u": "Unknown" } }
+  ]
+}
