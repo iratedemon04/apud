@@ -184,6 +184,7 @@ public class KeymapTests
         // Every command id the shipped keymap.json binds must be a real command,
         // and its chords must not collide — this is what "parses clean" means.
         var registry = Registry(
+            Cmd("catalogue.open"),
             Cmd("search.focus"), Cmd("record.new"), Cmd("record.save-draft", context: CommandContext.Editor),
             Cmd("record.save-template", context: CommandContext.Editor),
             Cmd("record.undo", context: CommandContext.Editor), Cmd("record.redo", context: CommandContext.Editor),
@@ -199,6 +200,7 @@ public class KeymapTests
         Assert.Empty(keymap.Diagnostics);
         Assert.Equal("search.focus", keymap.Lookup(Keys.F2, CommandContext.Search));
         Assert.Equal("record.push", keymap.Lookup(Keys.Control | Keys.L, CommandContext.Editor));
+        Assert.Equal("catalogue.open", keymap.Lookup(Keys.Control | Keys.O, CommandContext.Search));
     }
 
     [Fact]

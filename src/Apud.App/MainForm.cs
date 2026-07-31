@@ -68,7 +68,7 @@ public sealed class MainForm : Form
         // Menus render from this table and keymap.json binds against it.
         // Catalogue commands are menu-only (§6.2: record commands own the keyboard).
         _commands.Add(new Command { Id = "catalogue.new", Name = "&New Catalogue...", Execute = NewCatalog });
-        _commands.Add(new Command { Id = "catalogue.open", Name = "&Open Catalogue...", Execute = OpenCatalogDialog });
+        _commands.Add(new Command { Id = "catalogue.open", Name = "&Open Catalogue...", DefaultKey = "Ctrl+O", Execute = OpenCatalogDialog });
         _commands.Add(new Command { Id = "catalogue.import-folder", Name = "&Import Folder...", Execute = ImportFolder });
         _commands.Add(new Command { Id = "catalogue.export-base", Name = "Export &Base...", Execute = ExportBase });
         _commands.Add(new Command { Id = "catalogue.export-selected", Name = "Export &Selected...", Execute = ExportSelected });

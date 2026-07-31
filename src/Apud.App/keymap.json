@@ -10,10 +10,10 @@
 // Plain unmodified letters/digits only fire while no text box has the cursor.
 //
 // Menu-only commands (bindable here if you want keys for them):
-//   catalogue.new, catalogue.open, catalogue.import-folder,
-//   catalogue.export-base, catalogue.export-selected, base.bib, base.aut,
-//   help.about
+//   catalogue.new, catalogue.import-folder, catalogue.export-base,
+//   catalogue.export-selected, base.bib, base.aut, help.about
 {
+  "catalogue.open": "Ctrl+O",
   "search.focus": "F2",
   "record.new": "Ctrl+N",
   "record.save-draft": "Ctrl+S",
