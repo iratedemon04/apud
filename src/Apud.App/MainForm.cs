@@ -1,4 +1,5 @@
 using Apud.Data;
+using Marc.Core;
 using Marc.Core.FixedFields;
 
 namespace Apud.App;
@@ -90,7 +91,7 @@ public sealed class MainForm : Form
         _commands.Add(new Command { Id = "subfield.delete", Name = "Delete Subf&ield", Context = CommandContext.Editor, DefaultKey = "Ctrl+F7", Execute = DeleteCurrentSubfield });
         // Stubs wired, not built — keys rebindable from day one (step 7).
         _commands.Add(new Command { Id = "field.fixed-edit", Name = "Edit Fixed Field by &Position...", Context = CommandContext.Editor, DefaultKey = "Ctrl+F3", Execute = EditFixedField });
-        _commands.Add(new Command { Id = "field.validate", Name = "&Validate Field / Browse Headings", Context = CommandContext.Editor, DefaultKey = "Ctrl+F4", Execute = () => SetMessage("Field validation and heading browse arrive in Module 8.") });
+        _commands.Add(new Command { Id = "field.validate", Name = "Browse && Link &Heading", Context = CommandContext.Editor, DefaultKey = "Ctrl+F4", Execute = BrowseAndLinkHeading });
         _commands.Add(new Command { Id = "record.validate", Name = "Validate &Record", Context = CommandContext.Editor, DefaultKey = "Ctrl+W", Execute = () => SetMessage("Validation arrives in Module 9.") });
         _commands.Add(new Command { Id = "record.push", Name = "Validate && &Push", Context = CommandContext.Editor, DefaultKey = "Ctrl+L", Execute = () => SetMessage("Validate + push arrives in Module 9.") });
 
@@ -958,6 +959,65 @@ public sealed class MainForm : Form
         UpdateSidebarItem(doc);
         SelectCell(at.FieldIndex, -1, "value");
         SetMessage($"{(at.FieldIndex < 0 ? "Leader" : "008")} updated by position.");
+    }
+
+    // ---------- authority browse + link (Ctrl+F4, Module 8) ----------
+
+    /// <summary>Ctrl+F4: from a controlled bib heading field, open the AUT browse
+    /// list positioned at the field text; Enter on a heading rewrites the field to
+    /// the authorized form and stores the link (§6.2 red-pen: "Enter links BOTH
+    /// records"). The write goes through EditorDocument, so Ctrl+Z reverts it.</summary>
+    private void BrowseAndLinkHeading()
+    {
+        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+        if (_currentDoc is null) { SetMessage("No record on screen."); return; }
+        _viewer.EndEdit();
+
+        var doc = _currentDoc;
+        if (doc.Stored.Base != "BIB")
+        {
+            SetMessage("Ctrl+F4 links bibliographic headings to the authority base — open a BIB record.");
+            return;
+        }
+        if (CurrentRef() is not { } at || at.FieldIndex < 0)
+        {
+            SetMessage("Stand on a heading field first (a name, subject, or added entry).");
+            return;
+        }
+
+        var field = doc.Record.Fields[at.FieldIndex];
+        if (!Headings.IsControlledBibTag(field.Tag))
+        {
+            SetMessage($"{field.Tag} is not a controlled heading field — Ctrl+F4 works on 1XX/240/6XX/7XX/8XX.");
+            return;
+        }
+
+        string fieldText = Headings.HeadingText(field);
+        BrowseResult Position(string text) => _repo.BrowseHeadings(HeadingNormalization.Normalize(text));
+
+        var initial = Position(fieldText);
+        if (initial.Entries.Count == 0)
+        {
+            SetMessage("No authority headings to browse — the AUT base has no pushed records yet.");
+            return;
+        }
+
+        using var form = new AuthorityBrowseForm(fieldText, initial, Position);
+        if (form.ShowDialog(this) != DialogResult.OK || form.SelectedAuthRecordId is not long authId) return;
+
+        var auth = _repo.Load(authId);
+        if (auth is null) { SetMessage("That authority record could not be loaded."); return; }
+
+        if (!doc.LinkAuthority(at.FieldIndex, authId, auth.Record))
+        {
+            SetMessage("That authority record has no 1XX heading to copy — nothing linked.");
+            return;
+        }
+
+        RenderRecord();
+        UpdateSidebarItem(doc);
+        SelectCell(at.FieldIndex, 0, "value");
+        SetMessage($"Linked {field.Tag} to authorized heading: {form.SelectedDisplay}");
     }
 
     // ---------- new record / save (Module 6 steps 4-6) ----------

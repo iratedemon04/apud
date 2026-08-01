@@ -37,3 +37,13 @@ public sealed class StoredRecord
 public sealed record RecordSummary(
     long Id, string Base, string? ControlNumber, RecordStatus Status, string Title,
     string Author, string Year, DateTime UpdatedUtc);
+
+/// <summary>One line of the authority browse list (Module 8): which authority
+/// record it belongs to, whether it is the authorized/see/see-also form, the tag
+/// it came from, its normalized sort key and its display text.</summary>
+public sealed record BrowseHeading(
+    long AuthRecordId, HeadingKind Kind, string Tag, string Normalized, string Display);
+
+/// <summary>A positioned browse window: the entries in normalized order and the
+/// index of the row the cursor should land on (first entry ≥ the search point).</summary>
+public sealed record BrowseResult(IReadOnlyList<BrowseHeading> Entries, int Position);

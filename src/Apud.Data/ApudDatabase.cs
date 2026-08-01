@@ -14,7 +14,7 @@ namespace Apud.Data;
 /// </summary>
 public sealed class ApudDatabase : IDisposable
 {
-    public const int SchemaVersion = 2;
+    public const int SchemaVersion = 3;
 
     public SqliteConnection Connection { get; }
 
@@ -47,9 +47,18 @@ public sealed class ApudDatabase : IDisposable
 
         if (version == 0) { CreateSchemaV1(); version = 1; }
         if (version == 1) { UpgradeV1ToV2(); version = 2; }
+        if (version == 2) { UpgradeV2ToV3(); version = 3; }
 
         Execute($"PRAGMA user_version = {SchemaVersion};");
     }
+
+    /// <summary>
+    /// v3 (Module 8): the heading_index table has existed since v1 but nothing
+    /// populated it until authority browse arrived. Building it from every pushed
+    /// AUT record here means a catalogue imported under an earlier Apud gains its
+    /// authority browse index the first time this version opens it — no re-import.
+    /// </summary>
+    private void UpgradeV2ToV3() => HeadingIndexer.Rebuild(Connection, new RecordRepository(this));
 
     /// <summary>
     /// v2 (Module 5a): record_fts gains the accent-folding tokenizer

@@ -51,6 +51,8 @@ public sealed class RecordRepository
         WriteFields(tx, rec);
         if (rec.Status == RecordStatus.Pushed)
             FtsIndexer.Add(_db.Connection, tx, rec.Id);
+        if (rec.Base == "AUT" && rec.Status == RecordStatus.Pushed)
+            HeadingIndexer.Index(_db.Connection, tx, rec.Id, rec.Record);
 
         rec.CreatedUtc = now;
         rec.UpdatedUtc = now;
@@ -91,6 +93,15 @@ public sealed class RecordRepository
         WriteFields(tx, rec);
         if (rec.Status == RecordStatus.Pushed)
             FtsIndexer.Add(_db.Connection, tx, rec.Id);
+        // Keep the authority browse index in step (heading_index is keyed by
+        // record, not by the field rows just rewritten, so it must be redone here).
+        if (rec.Base == "AUT")
+        {
+            if (rec.Status == RecordStatus.Pushed)
+                HeadingIndexer.Index(_db.Connection, tx, rec.Id, rec.Record);
+            else
+                HeadingIndexer.Remove(_db.Connection, tx, rec.Id);
+        }
         tx.Commit();
 
         rec.UpdatedUtc = now;
@@ -244,8 +255,21 @@ public sealed class RecordRepository
         return list;
     }
 
+    /// <summary>
+    /// Deletes a record. An authority record that still has bib fields linked to
+    /// it is REFUSED (docs/PLAN.md §6.3.7) — the caller shows the linked count and
+    /// the links must be moved first; this protects authority control from
+    /// dangling references. (heading_index rows cascade away on delete; heading_link
+    /// rows deliberately do not, which is what makes this refusal possible.)
+    /// </summary>
     public void Delete(long id)
     {
+        long links = CountLinksTo(id);
+        if (links > 0)
+            throw new InvalidOperationException(
+                $"This authority record is still linked from {links} bibliographic field(s). " +
+                "Move or remove those links before deleting it.");
+
         using var tx = _db.Connection.BeginTransaction();
         if (WasPushed(tx, id))
             FtsIndexer.Remove(_db.Connection, tx, id); // while field rows still exist
@@ -308,6 +332,96 @@ public sealed class RecordRepository
     /// <summary>Ids of BIB fields linked to the given authority record (ripple/refuse-delete support).</summary>
     public long CountLinksTo(long authRecordId) =>
         (long)_db.Scalar($"SELECT COUNT(*) FROM heading_link WHERE auth_record_id = {authRecordId}")!;
+
+    // ---------- authority browse (Module 8) ----------
+
+    /// <summary>
+    /// The authority browse list positioned at <paramref name="normalizedStart"/>
+    /// (the normalized text of the bib field the cursor is on): a block of entries
+    /// at/after that point plus a little context above it, all across the AUT base's
+    /// authorized, see and see-also headings in normalized order. Aleph-style — the
+    /// cataloguer scrolls a single interleaved index. <see cref="BrowseResult.Position"/>
+    /// is the row the cursor should land on (the first entry ≥ the start point).
+    /// </summary>
+    public BrowseResult BrowseHeadings(string normalizedStart, int before = 40, int after = 200)
+    {
+        var backward = ReadHeadings(
+            "WHERE normalized < $start ORDER BY normalized DESC, display DESC, auth_record_id DESC LIMIT $limit",
+            normalizedStart, before);
+        backward.Reverse();
+        var forward = ReadHeadings(
+            "WHERE normalized >= $start ORDER BY normalized, display, auth_record_id LIMIT $limit",
+            normalizedStart, after);
+
+        var entries = new List<BrowseHeading>(backward.Count + forward.Count);
+        entries.AddRange(backward);
+        entries.AddRange(forward);
+        return new BrowseResult(entries, backward.Count);
+    }
+
+    private List<BrowseHeading> ReadHeadings(string whereOrder, string start, int limit)
+    {
+        var list = new List<BrowseHeading>();
+        using var cmd = _db.Connection.CreateCommand();
+        cmd.CommandText =
+            "SELECT auth_record_id, kind, tag, normalized, display FROM heading_index " + whereOrder + ";";
+        cmd.Parameters.AddWithValue("$start", start);
+        cmd.Parameters.AddWithValue("$limit", limit);
+        using var r = cmd.ExecuteReader();
+        while (r.Read())
+            list.Add(new BrowseHeading(
+                r.GetInt64(0), HeadingIndexer.KindFrom(r.GetString(1)),
+                r.GetString(2), r.GetString(3), r.GetString(4)));
+        return list;
+    }
+
+    /// <summary>Record ids of the BIB records with at least one field linked to
+    /// the given authority record — the audience of a ripple, and the list shown
+    /// when a delete is refused.</summary>
+    public IReadOnlyList<long> LinkedBibIds(long authRecordId)
+    {
+        var ids = new List<long>();
+        using var cmd = _db.Connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT DISTINCT f.record_id FROM heading_link hl
+            JOIN field f ON f.id = hl.field_id
+            WHERE hl.auth_record_id = $a ORDER BY f.record_id;
+            """;
+        cmd.Parameters.AddWithValue("$a", authRecordId);
+        using var r = cmd.ExecuteReader();
+        while (r.Read()) ids.Add(r.GetInt64(0));
+        return ids;
+    }
+
+    /// <summary>
+    /// Ripple (docs/PLAN.md §6.3.7): after an authority record's heading changes,
+    /// rewrite every linked bib field to the new authorized form (relators
+    /// preserved) and return how many fields were rewritten. The heavy caller is
+    /// Module 9's push cycle, which owns the surrounding transaction; the rewrite
+    /// logic itself lives here so it is built and tested now.
+    /// </summary>
+    public int RewriteLinkedBibHeadings(long authRecordId)
+    {
+        var auth = Load(authRecordId);
+        if (auth is null) return 0;
+
+        int count = 0;
+        foreach (var bibId in LinkedBibIds(authRecordId))
+        {
+            var bib = Load(bibId);
+            if (bib is null) continue;
+
+            bool changed = false;
+            foreach (var f in bib.Record.Fields)
+                if (f.AuthLinkId == authRecordId && Headings.ApplyAuthorizedHeading(f, auth.Record))
+                {
+                    changed = true;
+                    count++;
+                }
+            if (changed) Update(bib);
+        }
+        return count;
+    }
 
     // ---------- sequence & settings ----------
 

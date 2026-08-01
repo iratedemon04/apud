@@ -193,7 +193,7 @@ public class FtsSearchTests : IDisposable
 
             using (var db = ApudDatabase.Open(path))
             {
-                Assert.Equal(2L, db.Scalar("PRAGMA user_version;"));
+                Assert.Equal((long)ApudDatabase.SchemaVersion, db.Scalar("PRAGMA user_version;"));
                 Assert.Single(new RecordRepository(db).Search("BIB", "fisica"));
             }
         }

@@ -214,6 +214,30 @@ public sealed class EditorDocument
         }
     }
 
+    // ---------- authority linking (Ctrl+F4, Module 8) ----------
+
+    /// <summary>
+    /// Links a controlled field to an authority record: rewrites the field to the
+    /// authorized heading (relators preserved, <see cref="Headings.ApplyAuthorizedHeading"/>)
+    /// and stores the link. Routed through <see cref="Apply"/> so Ctrl+Z reverts
+    /// both the heading text and the link in one step. Returns false when the
+    /// authority record has no 1XX to copy.
+    /// </summary>
+    public bool LinkAuthority(int fieldIndex, long authRecordId, MarcRecord authRecord)
+    {
+        var field = Record.Fields[fieldIndex];
+        bool applied = false;
+        Apply(() =>
+        {
+            if (Headings.ApplyAuthorizedHeading(field, authRecord))
+            {
+                field.AuthLinkId = authRecordId;
+                applied = true;
+            }
+        });
+        return applied;
+    }
+
     // ---------- copies (Ctrl+N in a record) ----------
 
     /// <summary>
