@@ -21,6 +21,8 @@
   <ItemGroup>
     <Content Include="tagnames.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="keymap.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="profile-bib.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="profile-aut.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="templates\*.mrk" CopyToOutputDirectory="PreserveNewest" />
     <InternalsVisibleTo Include="Apud.Tests" />
   </ItemGroup>

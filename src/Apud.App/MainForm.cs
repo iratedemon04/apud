@@ -1,6 +1,7 @@
 using Apud.Data;
 using Marc.Core;
 using Marc.Core.FixedFields;
+using Marc.Core.Validation;
 
 namespace Apud.App;
 
@@ -36,6 +37,7 @@ public sealed class MainForm : Form
 
     private readonly Label _recordHeader;
     private readonly DataGridView _viewer;
+    private readonly ListView _findings;          // Ctrl+W/Ctrl+L output, click to jump
 
     private static readonly (string Label, SearchScope Scope)[] Scopes =
     {
@@ -92,8 +94,8 @@ public sealed class MainForm : Form
         // Stubs wired, not built — keys rebindable from day one (step 7).
         _commands.Add(new Command { Id = "field.fixed-edit", Name = "Edit Fixed Field by &Position...", Context = CommandContext.Editor, DefaultKey = "Ctrl+F3", Execute = EditFixedField });
         _commands.Add(new Command { Id = "field.validate", Name = "Browse && Link &Heading", Context = CommandContext.Editor, DefaultKey = "Ctrl+F4", Execute = BrowseAndLinkHeading });
-        _commands.Add(new Command { Id = "record.validate", Name = "Validate &Record", Context = CommandContext.Editor, DefaultKey = "Ctrl+W", Execute = () => SetMessage("Validation arrives in Module 9.") });
-        _commands.Add(new Command { Id = "record.push", Name = "Validate && &Push", Context = CommandContext.Editor, DefaultKey = "Ctrl+L", Execute = () => SetMessage("Validate + push arrives in Module 9.") });
+        _commands.Add(new Command { Id = "record.validate", Name = "Validate &Record", Context = CommandContext.Editor, DefaultKey = "Ctrl+W", Execute = ValidateRecord });
+        _commands.Add(new Command { Id = "record.push", Name = "Validate && &Push", Context = CommandContext.Editor, DefaultKey = "Ctrl+L", Execute = PushRecord });
 
         _keymap = Keymap.LoadFile(_commands, Path.Combine(AppContext.BaseDirectory, Keymap.FileName));
 
@@ -319,8 +321,30 @@ public sealed class MainForm : Form
         value.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
         _viewer.Columns.Add(value);
 
+        // Validation output (Module 9): a list docked below the record, hidden
+        // until Ctrl+W/Ctrl+L produces findings. Clicking or pressing Enter on a
+        // row jumps the cursor to the offending field (docs/PLAN.md §5).
+        _findings = new ListView
+        {
+            Dock = DockStyle.Bottom,
+            Height = 130,
+            View = View.Details,
+            FullRowSelect = true,
+            MultiSelect = false,
+            HideSelection = false,
+            Visible = false,
+        };
+        _findings.Columns.Add("", 70);          // severity
+        _findings.Columns.Add("Field", 90);
+        _findings.Columns.Add("Message", 640);
+        _findings.DoubleClick += (_, _) => JumpToSelectedFinding();
+        _findings.KeyDown += (_, e) => { if (e.KeyCode == Keys.Enter) { JumpToSelectedFinding(); e.Handled = true; } };
+
         _recordView = new Panel { Dock = DockStyle.Fill, Visible = false };
+        // Add order sets docking: viewer fills, findings pins to the bottom,
+        // header pins to the top.
         _recordView.Controls.Add(_viewer);
+        _recordView.Controls.Add(_findings);
         _recordView.Controls.Add(_recordHeader);
 
         // ----- composition -----
@@ -357,6 +381,10 @@ public sealed class MainForm : Form
         var configReports = new List<string>();
         if (TagNames.LoadFile(Path.Combine(AppContext.BaseDirectory, TagNames.FileName)) is string tagNamesReport)
             configReports.Add(tagNamesReport);
+        foreach (var b in new[] { "BIB", "AUT" })
+            if (ValidationProfileConfig.LoadFile(
+                    Path.Combine(AppContext.BaseDirectory, ValidationProfileConfig.FileName(b)), b) is string profileReport)
+                configReports.Add(profileReport);
         configReports.AddRange(_keymap.Diagnostics);
         Load += (_, _) => SetMessage(configReports.Count > 0
             ? string.Join("  |  ", configReports)
@@ -1018,6 +1046,142 @@ public sealed class MainForm : Form
         UpdateSidebarItem(doc);
         SelectCell(at.FieldIndex, 0, "value");
         SetMessage($"Linked {field.Tag} to authorized heading: {form.SelectedDisplay}");
+    }
+
+    // ---------- validate + push (Ctrl+W / Ctrl+L, Module 9) ----------
+
+    /// <summary>Ctrl+W: run the whole pipeline as a dry run — nothing is written.
+    /// Errors and warnings both show in the findings list; a clean record just
+    /// says so.</summary>
+    private void ValidateRecord()
+    {
+        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+        if (_currentDoc is null) { SetMessage("No record on screen."); return; }
+        _viewer.EndEdit();
+
+        var profile = ValidationProfileConfig.For(_currentDoc.Stored.Base);
+        var findings = new PushService(_repo).Check(_currentDoc.Stored, profile);
+        ShowFindings(findings);
+
+        if (findings.Count == 0)
+            SetMessage("Record is valid — no problems found.");
+        else
+            SetMessage(FindingSummary(findings) + " — validation only, nothing pushed.");
+    }
+
+    /// <summary>Ctrl+L: validate and push. On any error nothing is written and the
+    /// findings list stays up so the cataloguer can click straight to each one; a
+    /// clean record is promoted to pushed (001/005/leader derived) and, for an
+    /// authority record, ripples into its linked bibs.</summary>
+    private void PushRecord()
+    {
+        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+        if (_currentDoc is null) { SetMessage("No record on screen."); return; }
+        _viewer.EndEdit();
+
+        var doc = _currentDoc;
+        var profile = ValidationProfileConfig.For(doc.Stored.Base);
+
+        PushResult result;
+        try
+        {
+            result = new PushService(_repo).Push(doc.Stored, profile);
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException ex)
+        {
+            SetMessage($"Not pushed: {ex.Message}");
+            return;
+        }
+
+        if (!result.Ok)
+        {
+            ShowFindings(result.Findings);
+            SetMessage($"{FindingSummary(result.Findings)} — push blocked; nothing was written.");
+            return;
+        }
+
+        // Pushed: the record was reordered and its mechanical fields filled, so
+        // re-render and refresh. Warnings (if any) were shown against the pre-push
+        // layout during the run; the summary reports their count.
+        doc.MarkSaved();
+        RenderRecord();
+        UpdateSidebarItem(doc);
+        UpdateHeader();
+        ClearFindings();
+
+        int warnings = result.Warnings.Count();
+        string msg = $"Pushed as {doc.Record.ControlNumber} in {doc.Stored.Base}.";
+        if (warnings > 0) msg += $" {warnings} warning(s) — Ctrl+W to review.";
+        if (result.RippledFields > 0) msg += $" Rippled into {result.RippledFields} linked bib field(s).";
+        SetMessage(msg);
+    }
+
+    /// <summary>Fills and shows the findings list (errors first), or hides it when
+    /// there is nothing to report. Each row remembers its field ref for jumping.</summary>
+    private void ShowFindings(IReadOnlyList<ValidationFinding> findings)
+    {
+        _findings.BeginUpdate();
+        _findings.Items.Clear();
+        foreach (var f in findings.OrderBy(f => f.IsError ? 0 : 1))
+        {
+            var item = new ListViewItem(f.IsError ? "Error" : "Warning")
+            {
+                ForeColor = f.IsError ? Color.Firebrick : Color.DarkGoldenrod,
+                Tag = f.Ref,
+            };
+            item.SubItems.Add(FindingFieldLabel(f.Ref));
+            item.SubItems.Add(f.Message);
+            _findings.Items.Add(item);
+        }
+        _findings.EndUpdate();
+        _findings.Visible = findings.Count > 0;
+    }
+
+    private void ClearFindings()
+    {
+        _findings.Items.Clear();
+        _findings.Visible = false;
+    }
+
+    private static string FindingSummary(IReadOnlyList<ValidationFinding> findings)
+    {
+        int errors = findings.Count(f => f.IsError);
+        int warnings = findings.Count - errors;
+        var parts = new List<string>();
+        if (errors > 0) parts.Add($"{errors} error(s)");
+        if (warnings > 0) parts.Add($"{warnings} warning(s)");
+        return parts.Count == 0 ? "No problems" : string.Join(", ", parts);
+    }
+
+    /// <summary>The "Field" column text for a finding — its tag (with subfield code
+    /// when the ref is that precise), "Leader", or blank for a record-level rule.</summary>
+    private string FindingFieldLabel(FieldRef? @ref)
+    {
+        if (@ref is not FieldRef r || _currentDoc is null) return "";
+        if (r.FieldIndex < 0) return "Leader";
+        if (r.FieldIndex >= _currentDoc.Record.Fields.Count) return "";
+        var field = _currentDoc.Record.Fields[r.FieldIndex];
+        if (r.SubfieldIndex >= 0 && r.SubfieldIndex < field.Subfields.Count)
+            return $"{field.Tag} ‡{field.Subfields[r.SubfieldIndex].Code}";
+        return field.Tag;
+    }
+
+    /// <summary>Click/Enter on a finding: move the cursor to the offending place
+    /// (docs/PLAN.md §5). Record-level findings (no ref) simply do nothing.</summary>
+    private void JumpToSelectedFinding()
+    {
+        if (_currentDoc is null || _findings.SelectedItems.Count == 0) return;
+        if (_findings.SelectedItems[0].Tag is not FieldRef r) return;
+
+        ShowRecordView();
+        foreach (DataGridViewRow gridRow in _viewer.Rows)
+        {
+            if (gridRow.Tag is not DisplayRow d || d.FieldIndex != r.FieldIndex) continue;
+            if (r.SubfieldIndex >= 0 && d.SubfieldIndex != r.SubfieldIndex) continue;
+            _viewer.CurrentCell = gridRow.Cells["value"];
+            _viewer.Focus();
+            return;
+        }
     }
 
     // ---------- new record / save (Module 6 steps 4-6) ----------

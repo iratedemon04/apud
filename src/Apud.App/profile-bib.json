@@ -1,0 +1,26 @@
+// Apud — bibliographic (BIB) validation profile.
+//
+// These are the rules Ctrl+L (validate + push) and Ctrl+W (validate only) apply
+// to a BIB record on top of the built-in structural and fixed-field checks.
+// Delete this file to fall back to the built-in defaults; edit it to match your
+// house style. Comments and trailing commas are allowed. A malformed entry is
+// reported in the message bar and the built-in rule is used for it — Apud never
+// refuses to start over this file.
+//
+// The shipped values are a deliberately lean MARC21 floor so a real, imperfect
+// catalogue is not flagged on every push. Tighten as strict as you like.
+{
+  // Each inner list means "at least one of these tags must be present".
+  "mandatory": [ ["245"] ],
+
+  // Tags that may appear at most once.
+  "nonRepeatable": [ "245", "100", "110", "111", "130", "240", "250" ],
+
+  // Subfields every occurrence of a tag must carry (one letter each).
+  "requiredSubfields": {
+    "245": "a"
+  },
+
+  // Authority-only rule (exactly one 1XX); off for bibliographic records.
+  "singleHeading1xx": false
+}

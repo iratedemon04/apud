@@ -1,0 +1,23 @@
+// Apud — authority (AUT) validation profile.
+//
+// Rules Ctrl+L / Ctrl+W apply to an authority record on top of the built-in
+// structural and fixed-field checks. Delete this file for the built-in defaults;
+// edit to taste. Comments and trailing commas allowed; a malformed entry is
+// reported and the built-in rule is used for it. Apud never refuses to start
+// over this file.
+{
+  // An authority record must have one 1XX heading — any of these tags.
+  "mandatory": [ ["100", "110", "111", "130", "150", "151", "155"] ],
+
+  // None of the 1XX heading tags may repeat.
+  "nonRepeatable": [ "100", "110", "111", "130", "150", "151", "155" ],
+
+  // Each heading form needs a ‡a.
+  "requiredSubfields": {
+    "100": "a", "110": "a", "111": "a", "130": "a",
+    "150": "a", "151": "a", "155": "a"
+  },
+
+  // Enforce exactly one 1XX heading in the record.
+  "singleHeading1xx": true
+}

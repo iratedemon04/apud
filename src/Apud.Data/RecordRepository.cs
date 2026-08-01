@@ -445,6 +445,40 @@ public sealed class RecordRepository
         return next;
     }
 
+    /// <summary>
+    /// The highest numeric 001 currently in a base, or 0 when the base has none.
+    /// This is what Module 9's push reads to assign the next control number —
+    /// live MAX+1 computed at the moment of Ctrl+L, never a stored counter
+    /// (Decisions: "001 SPECIALLY DUMB" — a persistent counter drifts out of step
+    /// with hand-numbered batches and later collides; MAX+1 always sits one past
+    /// the top, so it cannot collide, reuse, or backfill his manual gaps).
+    /// Non-numeric 001s cast to 0 in SQLite and so never raise the ceiling.
+    /// </summary>
+    public long MaxControlNumber(string @base)
+    {
+        using var cmd = _db.Connection.CreateCommand();
+        cmd.CommandText =
+            "SELECT MAX(CAST(control_number AS INTEGER)) FROM record " +
+            "WHERE base = $b AND control_number IS NOT NULL";
+        cmd.Parameters.AddWithValue("$b", @base);
+        var result = cmd.ExecuteScalar();
+        return result is long v ? v : 0;
+    }
+
+    /// <summary>True when another record in the base already owns this control
+    /// number — a hand-typed duplicate 001, which is a validation error the
+    /// cataloguer resolves (Apud never silently renumbers).</summary>
+    public bool ControlNumberUsedElsewhere(string @base, string controlNumber, long exceptId)
+    {
+        using var cmd = _db.Connection.CreateCommand();
+        cmd.CommandText =
+            "SELECT COUNT(*) FROM record WHERE base = $b AND control_number = $cn AND id <> $id";
+        cmd.Parameters.AddWithValue("$b", @base);
+        cmd.Parameters.AddWithValue("$cn", controlNumber);
+        cmd.Parameters.AddWithValue("$id", exceptId);
+        return (long)cmd.ExecuteScalar()! > 0;
+    }
+
     /// <summary>Ensures the sequence for a base will hand out numbers above <paramref name="highestSeen"/>.</summary>
     public void BumpSequencePast(string @base, long highestSeen) =>
         BumpSequencePast(null, @base, highestSeen);
