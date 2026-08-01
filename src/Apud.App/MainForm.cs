@@ -50,6 +50,7 @@ public sealed class MainForm : Form
 
     private readonly CommandRegistry _commands = new();
     private readonly Keymap _keymap;
+    private readonly AppState _appState = AppState.Load();
 
     private ApudDatabase? _db;
     private RecordRepository? _repo;
@@ -585,17 +586,35 @@ public sealed class MainForm : Form
         return Directory.Exists(apud) ? apud : documents;
     }
 
+    /// <summary>Where a File dialog should open: the last folder used if we still
+    /// have it, else the suggested one. The one remembered piece of UI state (user
+    /// 2026-08-01, explicit exception) — see <see cref="AppState"/>.</summary>
+    private string StartFolder() =>
+        !string.IsNullOrEmpty(_appState.LastFolder) && Directory.Exists(_appState.LastFolder)
+            ? _appState.LastFolder!
+            : SuggestedFolder();
+
+    /// <summary>Remembers the folder a dialog just used so the next one opens there.</summary>
+    private void RememberFolder(string? folder)
+    {
+        if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder)) return;
+        _appState.LastFolder = folder;
+        _appState.Save();
+    }
+
     private void NewCatalog()
     {
         using var dialog = new SaveFileDialog
         {
             Title = "New Catalogue",
-            InitialDirectory = SuggestedFolder(),
+            InitialDirectory = StartFolder(),
             FileName = "catalog.db",
             Filter = "Apud catalogue (*.db)|*.db",
             OverwritePrompt = true,
         };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+        RememberFolder(Path.GetDirectoryName(dialog.FileName));
 
         // The dialog already asked about overwriting; a stale file must not be
         // silently opened as an existing catalogue.
@@ -608,11 +627,13 @@ public sealed class MainForm : Form
         using var dialog = new OpenFileDialog
         {
             Title = "Open Catalogue",
-            InitialDirectory = SuggestedFolder(),
+            InitialDirectory = StartFolder(),
             Filter = "Apud catalogue (*.db)|*.db|All files (*.*)|*.*",
         };
-        if (dialog.ShowDialog(this) == DialogResult.OK)
-            OpenCatalog(dialog.FileName);
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+        RememberFolder(Path.GetDirectoryName(dialog.FileName));
+        OpenCatalog(dialog.FileName);
     }
 
     private void OpenCatalog(string path, bool createNew = false)
@@ -1751,13 +1772,14 @@ public sealed class MainForm : Form
         using var dialog = new OpenFileDialog
         {
             Title = "Import Records",
-            InitialDirectory = SuggestedFolder(),
+            InitialDirectory = StartFolder(),
             Filter = "MARC text (*.mrk)|*.mrk|All files (*.*)|*.*",
             Multiselect = true,
         };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
 
         var files = dialog.FileNames;
+        RememberFolder(Path.GetDirectoryName(files[0]));
         string source = files.Length == 1 ? files[0] : $"{files.Length} files";
         RunImport(source, new ImportEngine(_repo).Analyze(files));
     }
@@ -1771,9 +1793,11 @@ public sealed class MainForm : Form
         {
             Description = "Choose a folder; every .mrk file in it (and its subfolders) will be imported.",
             UseDescriptionForTitle = true,
+            SelectedPath = StartFolder(),
         };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
 
+        RememberFolder(dialog.SelectedPath);
         RunImport(dialog.SelectedPath, new ImportEngine(_repo).AnalyzeFolder(dialog.SelectedPath));
     }
 
@@ -1844,12 +1868,13 @@ public sealed class MainForm : Form
         using var dialog = new SaveFileDialog
         {
             Title = "Export",
-            InitialDirectory = SuggestedFolder(),
+            InitialDirectory = StartFolder(),
             FileName = suggestedName,
             Filter = "MARC text (*.mrk)|*.mrk",
             OverwritePrompt = true,
         };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        RememberFolder(Path.GetDirectoryName(dialog.FileName));
         int count = write(dialog.FileName);
         SetMessage($"Exported {count} record(s) to {dialog.FileName}.");
     }
