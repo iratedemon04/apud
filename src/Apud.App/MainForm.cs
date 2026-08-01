@@ -75,6 +75,7 @@ public sealed class MainForm : Form
         _commands.Add(new Command { Id = "catalogue.new", Name = "&New Catalogue...", Execute = NewCatalog });
         _commands.Add(new Command { Id = "catalogue.open", Name = "&Open Catalogue...", DefaultKey = "Ctrl+O", Execute = OpenCatalogDialog });
         _commands.Add(new Command { Id = "catalogue.import-folder", Name = "&Import Folder...", Execute = ImportFolder });
+        _commands.Add(new Command { Id = "catalogue.marc-out", Name = "Set MARC &Output Folder...", Execute = SetMarcOutFolder });
         _commands.Add(new Command { Id = "catalogue.export-base", Name = "Export &Base...", Execute = ExportBase });
         _commands.Add(new Command { Id = "catalogue.export-selected", Name = "Export &Selected...", Execute = ExportSelected });
         _commands.Add(new Command { Id = "app.exit", Name = "E&xit", DefaultKey = "Alt+F4", Execute = Close });
@@ -109,6 +110,7 @@ public sealed class MainForm : Form
         file.DropDownItems.Add(MenuItem("catalogue.open"));
         file.DropDownItems.Add(new ToolStripSeparator());
         file.DropDownItems.Add(MenuItem("catalogue.import-folder"));
+        file.DropDownItems.Add(MenuItem("catalogue.marc-out"));
         file.DropDownItems.Add(MenuItem("catalogue.export-base"));
         file.DropDownItems.Add(MenuItem("catalogue.export-selected"));
         file.DropDownItems.Add(new ToolStripSeparator());
@@ -1168,21 +1170,27 @@ public sealed class MainForm : Form
         UpdateHeader();
         ClearFindings();
 
-        // Mirror the pushed record to MARC_OUT\<001>.mrk beside the catalogue
-        // (user request). The push itself is already committed; a file-write
-        // failure is reported but does not undo the push.
-        string? mirrorError = null;
-        try { RecordMirror.Write(_catalogPath, doc.Record); }
+        // Mirror the pushed record to <output folder>\<001>.mrk (user request).
+        // The push itself is already committed; a file-write failure is reported
+        // but does not undo the push.
+        string mirrorNote;
+        try
+        {
+            string? written = RecordMirror.Write(MarcOutFolder(), doc.Record);
+            mirrorNote = written is not null
+                ? $" Wrote {Path.GetFileName(written)} to {Path.GetDirectoryName(written)}."
+                : " (no MARC output folder — File → Set MARC Output Folder to save .mrk files.)";
+        }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            mirrorError = $" (but its {RecordMirror.FolderName} file could not be written: {ex.Message})";
+            mirrorNote = $" (but its .mrk file could not be written: {ex.Message})";
         }
 
         int warnings = result.Warnings.Count();
         string msg = $"Pushed as {doc.Record.ControlNumber} in {doc.Stored.Base}.";
         if (warnings > 0) msg += $" {warnings} warning(s) — Ctrl+W to review.";
         if (result.RippledFields > 0) msg += $" Rippled into {result.RippledFields} linked bib field(s).";
-        SetMessage(msg + mirrorError);
+        SetMessage(msg + mirrorNote);
     }
 
     /// <summary>Fills and shows the findings list (errors first), or hides it when
@@ -1253,8 +1261,45 @@ public sealed class MainForm : Form
         }
     }
 
+    // ---------- MARC output folder ----------
+
+    private const string MarcOutSetting = "marc_out_folder";
+
+    /// <summary>The folder pushed records are mirrored to: the cataloguer's chosen
+    /// folder (persisted per catalogue) if set, else a MARC_OUT subfolder beside
+    /// the .db. Null only when no catalogue is open / it is in-memory.</summary>
+    private string? MarcOutFolder()
+    {
+        string? configured = _repo?.GetSetting(MarcOutSetting);
+        if (!string.IsNullOrWhiteSpace(configured)) return configured.Trim();
+        return RecordMirror.DefaultFolderFor(_catalogPath);
+    }
+
+    /// <summary>File → Set MARC Output Folder: pick the folder Apud writes each
+    /// pushed record's .mrk into. Stored in the catalogue's settings, so it is
+    /// remembered per catalogue. Cancelling leaves the current choice; picking the
+    /// same place is idempotent.</summary>
+    private void SetMarcOutFolder()
+    {
+        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+
+        string? current = _repo.GetSetting(MarcOutSetting);
+        using var dialog = new FolderBrowserDialog
+        {
+            Description = "Choose the folder Apud writes each pushed record to (as <001>.mrk).",
+            UseDescriptionForTitle = true,
+            SelectedPath = !string.IsNullOrWhiteSpace(current) && Directory.Exists(current)
+                ? current
+                : RecordMirror.DefaultFolderFor(_catalogPath) is string d && Directory.Exists(d) ? d : "",
+        };
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+        _repo.SetSetting(MarcOutSetting, dialog.SelectedPath);
+        SetMessage($"Pushed records will be written to {dialog.SelectedPath}.");
+    }
+
     /// <summary>Deletes the displayed record from the catalogue AND its
-    /// MARC_OUT\&lt;001&gt;.mrk file (user request). Irreversible, so it confirms
+    /// &lt;001&gt;.mrk file (user request). Irreversible, so it confirms
     /// first; a linked authority record is refused (repo.Delete guard) so
     /// authority control never dangles. Authority links key off the internal
     /// record id, not the 001, so removing a record never breaks other records.</summary>
@@ -1273,8 +1318,8 @@ public sealed class MainForm : Form
         string cn = doc.Record.ControlNumber ?? "(no 001)";
         if (MessageBox.Show(this,
                 $"Delete record {cn} from {doc.Stored.Base}?\n\n" +
-                $"This removes it from the catalogue and deletes its {RecordMirror.FolderName}\\{cn}.mrk " +
-                "file, if present. This cannot be undone.",
+                $"This removes it from the catalogue and deletes its {cn}.mrk " +
+                "file from the MARC output folder, if present. This cannot be undone.",
                 "Delete Record", MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
                 MessageBoxDefaultButton.Button2) != DialogResult.Yes)
             return;
@@ -1290,7 +1335,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        try { RecordMirror.Delete(_catalogPath, doc.Record.ControlNumber); }
+        try { RecordMirror.Delete(MarcOutFolder(), doc.Record.ControlNumber); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             SetMessage($"Record {cn} deleted from the catalogue, but its .mrk file could not be removed: {ex.Message}");
@@ -1299,7 +1344,7 @@ public sealed class MainForm : Form
         }
 
         CloseOpenRecord(doc);
-        SetMessage($"Deleted record {cn} from the catalogue and {RecordMirror.FolderName}.");
+        SetMessage($"Deleted record {cn} from the catalogue and its .mrk file.");
     }
 
     /// <summary>Closes a record's sidebar entry and viewer after it is gone from
