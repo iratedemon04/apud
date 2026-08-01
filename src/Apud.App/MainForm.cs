@@ -448,6 +448,7 @@ public sealed class MainForm : Form
 
     private void ShowLegal(IWin32Window owner) =>
         MessageBox.Show(owner,
+            "MIT License\n\n" +
             "Copyright (c) Alonso Cossío Vázquez 2026\n\n" + MitLicense,
             "Legal", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
@@ -1120,14 +1121,23 @@ public sealed class MainForm : Form
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
         _viewer.EndEdit();
 
+        // A brief, visible beat so the cataloguer sees that validation ran — a
+        // clean record's result is otherwise a single unchanged line and reads as
+        // "nothing happened".
+        SetMessage("Validating…");
+        _messageBar.Refresh();
+        Cursor.Current = Cursors.WaitCursor;
+        System.Threading.Thread.Sleep(200);
+        Cursor.Current = Cursors.Default;
+
         var profile = ValidationProfileConfig.For(_currentDoc.Stored.Base);
         var findings = new PushService(_repo).Check(_currentDoc.Stored, profile);
         ShowFindings(findings);
 
         if (findings.Count == 0)
-            SetMessage("Record is valid — no problems found.");
+            SetMessage("✓ Validation complete — the record is valid, no problems found.");
         else
-            SetMessage(FindingSummary(findings) + " — validation only, nothing pushed.");
+            SetMessage($"Validation complete — {FindingSummary(findings)} (see the list below). Nothing was pushed.");
     }
 
     /// <summary>Ctrl+L: validate and push. On any error nothing is written and the
