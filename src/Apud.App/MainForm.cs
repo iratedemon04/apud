@@ -448,8 +448,8 @@ public sealed class MainForm : Form
 
     private void ShowLegal(IWin32Window owner) =>
         MessageBox.Show(owner,
-            "MIT License\n\n" +
-            "Copyright (c) Alonso Cossío Vázquez 2026\n\n" + MitLicense,
+            "Copyright (c) Alonso Cossío Vázquez 2026\n\n" +
+            "MIT License\n\n" + MitLicense,
             "Legal", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
     /// <summary>The MIT License text (Apud is released under it).</summary>
@@ -1152,6 +1152,13 @@ public sealed class MainForm : Form
 
         var doc = _currentDoc;
         var profile = ValidationProfileConfig.For(doc.Stored.Base);
+
+        // A brief, visible beat so the push reads as a real action (same as Ctrl+W).
+        SetMessage("Validating and pushing…");
+        _messageBar.Refresh();
+        Cursor.Current = Cursors.WaitCursor;
+        System.Threading.Thread.Sleep(200);
+        Cursor.Current = Cursors.Default;
 
         PushResult result;
         try
