@@ -53,6 +53,7 @@ public sealed class MainForm : Form
 
     private ApudDatabase? _db;
     private RecordRepository? _repo;
+    private string? _catalogPath;          // the open .db path; MARC_OUT sits beside it
     private bool _syncingBase;
     private EditorDocument? _currentDoc; // the record showing in the editor
     private bool _rendering;             // grid is being rebuilt; ignore its edit events
@@ -96,6 +97,7 @@ public sealed class MainForm : Form
         _commands.Add(new Command { Id = "field.validate", Name = "Browse && Link &Heading", Context = CommandContext.Editor, DefaultKey = "Ctrl+F4", Execute = BrowseAndLinkHeading });
         _commands.Add(new Command { Id = "record.validate", Name = "Validate &Record", Context = CommandContext.Editor, DefaultKey = "Ctrl+W", Execute = ValidateRecord });
         _commands.Add(new Command { Id = "record.push", Name = "Validate && &Push", Context = CommandContext.Editor, DefaultKey = "Ctrl+L", Execute = PushRecord });
+        _commands.Add(new Command { Id = "record.delete", Name = "&Delete Record...", Context = CommandContext.Editor, DefaultKey = "Ctrl+Delete", Execute = DeleteRecord });
 
         _keymap = Keymap.LoadFile(_commands, Path.Combine(AppContext.BaseDirectory, Keymap.FileName));
 
@@ -136,6 +138,8 @@ public sealed class MainForm : Form
         record.DropDownItems.Add(MenuItem("field.validate"));
         record.DropDownItems.Add(MenuItem("record.validate"));
         record.DropDownItems.Add(MenuItem("record.push"));
+        record.DropDownItems.Add(new ToolStripSeparator());
+        record.DropDownItems.Add(MenuItem("record.delete"));
 
         var help = new ToolStripMenuItem("&Help");
         help.DropDownItems.Add(MenuItem("help.about"));
@@ -404,10 +408,64 @@ public sealed class MainForm : Form
         return item;
     }
 
-    private void ShowAbout() =>
-        MessageBox.Show(this,
-            $"Apud {Application.ProductVersion}\nMARC21 original cataloguing.",
-            "About Apud", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    private void ShowAbout()
+    {
+        using var about = new Form
+        {
+            Text = "About Apud",
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            StartPosition = FormStartPosition.CenterParent,
+            MinimizeBox = false,
+            MaximizeBox = false,
+            ClientSize = new Size(380, 150),
+        };
+        var label = new Label
+        {
+            Text = $"Apud {Application.ProductVersion}\nMARC21 original cataloguing.",
+            Dock = DockStyle.Top,
+            Height = 80,
+            TextAlign = ContentAlignment.MiddleCenter,
+            Font = new Font("Segoe UI", 9.75f),
+        };
+        var legal = new LinkLabel { Text = "Legal", AutoSize = true, Location = new Point(18, 108) };
+        legal.LinkClicked += (_, _) => ShowLegal(about);
+        var ok = new Button
+        {
+            Text = "OK",
+            DialogResult = DialogResult.OK,
+            Size = new Size(84, 28),
+            Location = new Point(about.ClientSize.Width - 100, 104),
+            Anchor = AnchorStyles.Right | AnchorStyles.Bottom,
+        };
+        about.Controls.Add(label);
+        about.Controls.Add(legal);
+        about.Controls.Add(ok);
+        about.AcceptButton = ok;
+        about.ShowDialog(this);
+    }
+
+    private void ShowLegal(IWin32Window owner) =>
+        MessageBox.Show(owner,
+            "Copyright (c) Alonso Cossío Vázquez 2026\n\n" + MitLicense,
+            "Legal", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+    /// <summary>The MIT License text (Apud is released under it).</summary>
+    private const string MitLicense =
+        "Permission is hereby granted, free of charge, to any person obtaining a copy " +
+        "of this software and associated documentation files (the \"Software\"), to deal " +
+        "in the Software without restriction, including without limitation the rights " +
+        "to use, copy, modify, merge, publish, distribute, sublicense, and/or sell " +
+        "copies of the Software, and to permit persons to whom the Software is " +
+        "furnished to do so, subject to the following conditions:\n\n" +
+        "The above copyright notice and this permission notice shall be included in all " +
+        "copies or substantial portions of the Software.\n\n" +
+        "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR " +
+        "IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, " +
+        "FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE " +
+        "AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER " +
+        "LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, " +
+        "OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE " +
+        "SOFTWARE.";
 
     /// <summary>Keymap dispatch through the framework's shortcut hook. Keys land
     /// here before the focused control; chords the keymap doesn't claim follow
@@ -546,6 +604,7 @@ public sealed class MainForm : Form
         _db?.Dispose();
         _db = db;
         _repo = new RecordRepository(db);
+        _catalogPath = path;
 
         // A different catalogue means different record ids: everything on
         // screen belonged to the old one.
@@ -1109,11 +1168,21 @@ public sealed class MainForm : Form
         UpdateHeader();
         ClearFindings();
 
+        // Mirror the pushed record to MARC_OUT\<001>.mrk beside the catalogue
+        // (user request). The push itself is already committed; a file-write
+        // failure is reported but does not undo the push.
+        string? mirrorError = null;
+        try { RecordMirror.Write(_catalogPath, doc.Record); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            mirrorError = $" (but its {RecordMirror.FolderName} file could not be written: {ex.Message})";
+        }
+
         int warnings = result.Warnings.Count();
         string msg = $"Pushed as {doc.Record.ControlNumber} in {doc.Stored.Base}.";
         if (warnings > 0) msg += $" {warnings} warning(s) — Ctrl+W to review.";
         if (result.RippledFields > 0) msg += $" Rippled into {result.RippledFields} linked bib field(s).";
-        SetMessage(msg);
+        SetMessage(msg + mirrorError);
     }
 
     /// <summary>Fills and shows the findings list (errors first), or hides it when
@@ -1182,6 +1251,69 @@ public sealed class MainForm : Form
             _viewer.Focus();
             return;
         }
+    }
+
+    /// <summary>Deletes the displayed record from the catalogue AND its
+    /// MARC_OUT\&lt;001&gt;.mrk file (user request). Irreversible, so it confirms
+    /// first; a linked authority record is refused (repo.Delete guard) so
+    /// authority control never dangles. Authority links key off the internal
+    /// record id, not the 001, so removing a record never breaks other records.</summary>
+    private void DeleteRecord()
+    {
+        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+        if (_currentDoc is null) { SetMessage("No record on screen."); return; }
+        var doc = _currentDoc;
+
+        if (doc.Stored.Id == 0)
+        {
+            SetMessage("This record was never saved — use Remove in the sidebar to close it.");
+            return;
+        }
+
+        string cn = doc.Record.ControlNumber ?? "(no 001)";
+        if (MessageBox.Show(this,
+                $"Delete record {cn} from {doc.Stored.Base}?\n\n" +
+                $"This removes it from the catalogue and deletes its {RecordMirror.FolderName}\\{cn}.mrk " +
+                "file, if present. This cannot be undone.",
+                "Delete Record", MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+            return;
+
+        try
+        {
+            _repo.Delete(doc.Stored.Id);
+        }
+        catch (InvalidOperationException ex) // the refuse-delete guard for a linked authority
+        {
+            MessageBox.Show(this, ex.Message, "Delete Record",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        try { RecordMirror.Delete(_catalogPath, doc.Record.ControlNumber); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            SetMessage($"Record {cn} deleted from the catalogue, but its .mrk file could not be removed: {ex.Message}");
+            CloseOpenRecord(doc);
+            return;
+        }
+
+        CloseOpenRecord(doc);
+        SetMessage($"Deleted record {cn} from the catalogue and {RecordMirror.FolderName}.");
+    }
+
+    /// <summary>Closes a record's sidebar entry and viewer after it is gone from
+    /// the catalogue (no dirty prompt — it no longer exists to save).</summary>
+    private void CloseOpenRecord(EditorDocument doc)
+    {
+        foreach (ListViewItem item in _openList.Items.Cast<ListViewItem>().ToList())
+            if (ReferenceEquals(item.Tag, doc))
+            {
+                _openList.Items.Remove(item);
+                break;
+            }
+        if (ReferenceEquals(_currentDoc, doc)) ClearViewer();
+        ClearFindings();
     }
 
     // ---------- new record / save (Module 6 steps 4-6) ----------
