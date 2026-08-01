@@ -21,15 +21,22 @@ public static class RecordMirror
 {
     public const string DefaultFolderName = "MARC_OUT";
 
-    /// <summary>The default output folder for a catalogue — a MARC_OUT subfolder
-    /// beside its .db — or null when the path is empty or in-memory.</summary>
-    public static string? DefaultFolderFor(string? catalogPath)
+    /// <summary>The BIB and AUT bases keep separate default folders: their control
+    /// numbers are numbered independently, so BIB 758.mrk and AUT 758.mrk would
+    /// otherwise collide in one folder (user request 2026-08-01 — authorities get
+    /// their own chosen folder, same logic as bib).</summary>
+    public const string DefaultFolderNameAut = "MARC_OUT_AUT";
+
+    /// <summary>The default output folder for a catalogue — a subfolder beside its
+    /// .db (MARC_OUT for bib, MARC_OUT_AUT for authority) — or null when the path
+    /// is empty or in-memory.</summary>
+    public static string? DefaultFolderFor(string? catalogPath, string folderName = DefaultFolderName)
     {
         if (string.IsNullOrEmpty(catalogPath) ||
             catalogPath.Equals(":memory:", StringComparison.OrdinalIgnoreCase))
             return null;
         var dir = Path.GetDirectoryName(Path.GetFullPath(catalogPath));
-        return dir is null ? null : Path.Combine(dir, DefaultFolderName);
+        return dir is null ? null : Path.Combine(dir, folderName);
     }
 
     /// <summary>Writes (or overwrites) &lt;folder&gt;\&lt;001&gt;.mrk for a pushed

@@ -35,6 +35,18 @@ public class RecordMirrorTests : IDisposable
     }
 
     [Fact]
+    public void Authority_gets_its_own_default_folder_so_001s_dont_collide()
+    {
+        // BIB and AUT number 001s independently; separate default folders keep
+        // BIB 758.mrk and AUT 758.mrk apart (user request 2026-08-01).
+        Assert.Equal(Path.Combine(_dir, "MARC_OUT_AUT"),
+            RecordMirror.DefaultFolderFor(CatalogPath, RecordMirror.DefaultFolderNameAut));
+        Assert.NotEqual(RecordMirror.DefaultFolderFor(CatalogPath),
+            RecordMirror.DefaultFolderFor(CatalogPath, RecordMirror.DefaultFolderNameAut));
+        Assert.Null(RecordMirror.DefaultFolderFor(null, RecordMirror.DefaultFolderNameAut));
+    }
+
+    [Fact]
     public void Write_creates_the_folder_and_a_file_named_for_the_001()
     {
         var path = RecordMirror.Write(OutFolder, Record("758"));

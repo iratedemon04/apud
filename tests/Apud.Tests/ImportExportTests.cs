@@ -58,6 +58,24 @@ public class ImportExportTests : IDisposable
     }
 
     [Fact]
+    public void Importing_a_single_authority_file_routes_it_to_AUT()
+    {
+        // File → Import Records path (user request 2026-08-01): the user picks one
+        // file, not a folder, and its authority leader routes it to the AUT base.
+        WriteFile("bib.mrk", Bib("1", "Uno"));         // deliberately NOT selected
+        string one = WriteFile("auth.mrk", Aut("5", "Moreno, Matías"));
+
+        var plan = Engine.Analyze(new[] { one });
+
+        Assert.Single(plan.Report.Files);
+        Assert.Equal(1, plan.Report.TotalRecords);     // only the chosen file, not the folder
+        Engine.Commit(plan, ImportMode.AsPushed);
+
+        Assert.Single(Repo.List("AUT"));
+        Assert.Empty(Repo.List("BIB"));                // the unselected bib stayed out
+    }
+
+    [Fact]
     public void Broken_file_reports_errors_with_line_numbers_and_blocks_pushed_commit()
     {
         WriteFile("clean.mrk", Bib("1", "Uno"));

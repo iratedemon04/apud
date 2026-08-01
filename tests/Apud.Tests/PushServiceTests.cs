@@ -123,6 +123,61 @@ public class PushServiceTests : IDisposable
         Assert.Equal(0, clash.Id); // nothing written
     }
 
+    // ---------- AUT 001: clearing restarts an otherwise-empty base (user 2026-08-01) ----------
+
+    private StoredRecord PushedAuthorityNumbered(string heading, string controlNumber)
+    {
+        var r = new MarcRecord { Leader = "00000nz  a2200000n  4500" };
+        r.Fields.Add(new MarcField("001") { ControlData = controlNumber });
+        r.Fields.Add(Data("100", '1', ' ', ('a', heading)));
+        var stored = new StoredRecord("AUT", r);
+        Assert.Equal(controlNumber, Push(stored).ControlNumber); // hand-typed 001 kept
+        return stored;
+    }
+
+    [Fact]
+    public void Clearing_an_AUT_001_in_an_otherwise_empty_base_restarts_at_1()
+    {
+        // The only authority in the base carries a big imported LC number.
+        var a = PushedAuthorityNumbered("Solo, Uno", "1458764");
+
+        // Delete its 001 and re-push: the base has no OTHER record, so the next
+        // number is 1 — not its own 1458764 + 1.
+        var reopened = Repo.Load(a.Id)!;
+        reopened.Record.Fields.RemoveAll(f => f.Tag == "001");
+        var result = Push(reopened);
+
+        Assert.True(result.Ok);
+        Assert.Equal("1", result.ControlNumber);
+        Assert.Equal("1", Repo.Load(a.Id)!.Record.ControlNumber);
+    }
+
+    [Fact]
+    public void A_cleared_AUT_001_sits_one_past_the_other_authorities()
+    {
+        PushedAuthorityNumbered("Keeper, K", "40");
+        var edited = PushedAuthorityNumbered("Edited, E", "99");
+
+        // Clear the top one's 001: excluding itself, the highest OTHER is 40, so 41.
+        var reopened = Repo.Load(edited.Id)!;
+        reopened.Record.Fields.RemoveAll(f => f.Tag == "001");
+        Assert.Equal("41", Push(reopened).ControlNumber);
+    }
+
+    [Fact]
+    public void BIB_keeps_its_own_ceiling_unchanged()
+    {
+        // BIB is deliberately left as-is: the record's own number still counts, so
+        // re-pushing the top record after clearing its 001 goes one past itself.
+        var rec = new StoredRecord("BIB", CleanBib());
+        rec.Record.Fields.Insert(0, new MarcField("001") { ControlData = "300" });
+        Push(rec);
+
+        var reopened = Repo.Load(rec.Id)!;
+        reopened.Record.Fields.RemoveAll(f => f.Tag == "001");
+        Assert.Equal("301", Push(reopened).ControlNumber);
+    }
+
     // ---------- blocking ----------
 
     [Fact]

@@ -112,9 +112,18 @@ public sealed class PushService
         var record = rec.Record;
 
         // 001: a hand-typed number is kept forever; an empty one gets live MAX+1
-        // for the base, computed now (no stored counter that could drift).
+        // for the base, computed now (no stored counter that could drift). For AUT,
+        // the record being pushed is excluded from that MAX (user, 2026-08-01), so
+        // clearing an authority's 001 in an otherwise-empty base restarts at 1
+        // rather than re-using its own old number + 1. BIB keeps its exact
+        // hand-numbered discipline ("001 SPECIALLY DUMB").
         if (string.IsNullOrEmpty(record.ControlNumber))
-            UpsertControl(record, "001", (_repo.MaxControlNumber(rec.Base) + 1).ToString());
+        {
+            long ceiling = rec.Base == "AUT"
+                ? _repo.MaxControlNumber(rec.Base, rec.Id)
+                : _repo.MaxControlNumber(rec.Base);
+            UpsertControl(record, "001", (ceiling + 1).ToString());
+        }
 
         // 005: transaction date-time, MARC form yyyymmddhhmmss.f.
         UpsertControl(record, "005", DateTime.Now.ToString("yyyyMMddHHmmss.f"));

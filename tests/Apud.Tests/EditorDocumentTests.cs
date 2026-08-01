@@ -144,6 +144,117 @@ public class EditorDocumentTests
         Assert.Equal(4, doc.Record.Fields.Count);
     }
 
+    // ---------- copy / paste field & subfield (user request 2026-08-01) ----------
+
+    [Fact]
+    public void Copy_and_paste_field_inserts_an_independent_clone_below()
+    {
+        var doc = Doc();
+        var clip = doc.CopyField(4);            // 650 $aFísica nuclear
+        int at = doc.PasteFieldAfter(4, clip);  // paste just below it
+
+        Assert.Equal(5, at);
+        Assert.Equal(new[] { "001", "008", "100", "245", "650", "650" },
+            doc.Record.Fields.Select(f => f.Tag).ToArray());
+        Assert.Equal("Física nuclear", doc.Record.Fields[5].Subfields[0].Value);
+
+        // Independent: editing the paste leaves the original untouched.
+        doc.Record.Fields[5].Subfields[0].Value = "Óptica";
+        Assert.Equal("Física nuclear", doc.Record.Fields[4].Subfields[0].Value);
+    }
+
+    [Fact]
+    public void A_copied_field_survives_later_edits_to_the_source()
+    {
+        var doc = Doc();
+        var clip = doc.CopyField(4);              // snapshot of 650
+        doc.SetSubfieldValue(4, 0, "changed");   // now edit the live field
+        int at = doc.PasteFieldAfter(4, clip);
+
+        Assert.Equal("Física nuclear", doc.Record.Fields[at].Subfields[0].Value); // clipboard unchanged
+    }
+
+    [Fact]
+    public void Pasting_the_same_field_twice_yields_two_independent_fields()
+    {
+        var doc = Doc();
+        var clip = doc.CopyField(4);
+        int a = doc.PasteFieldAfter(4, clip);
+        int b = doc.PasteFieldAfter(a, clip);
+
+        doc.Record.Fields[a].Subfields[0].Value = "one";
+        Assert.Equal("Física nuclear", doc.Record.Fields[b].Subfields[0].Value);
+    }
+
+    [Fact]
+    public void Copy_and_paste_subfield_clones_after_the_cursor()
+    {
+        var doc = Doc();                          // 100: $aMoreno, Matías $eautor
+        var clip = doc.CopySubfield(2, 0);        // copy $a
+        var (index, error) = doc.PasteSubfieldAfter(2, 0, clip);
+
+        Assert.Null(error);
+        Assert.Equal(1, index);
+        Assert.Equal('a', doc.Record.Fields[2].Subfields[1].Code);
+        Assert.Equal("Moreno, Matías", doc.Record.Fields[2].Subfields[1].Value);
+        Assert.Equal("autor", doc.Record.Fields[2].Subfields[2].Value); // $e pushed down
+    }
+
+    [Fact]
+    public void Pasting_a_subfield_into_a_control_field_is_refused()
+    {
+        var doc = Doc();
+        var clip = doc.CopySubfield(2, 0);
+        Assert.NotNull(doc.PasteSubfieldAfter(1, 0, clip).Error); // 008 is a control field
+    }
+
+    [Fact]
+    public void Paste_is_undoable_like_any_edit()
+    {
+        var doc = Doc();
+        var clip = doc.CopyField(4);
+        doc.PasteFieldAfter(4, clip);
+        Assert.Equal(6, doc.Record.Fields.Count);
+
+        doc.Undo();
+        Assert.Equal(5, doc.Record.Fields.Count);
+    }
+
+    // ---------- delete several fields at once (user request 2026-08-01) ----------
+
+    [Fact]
+    public void DeleteFields_removes_all_of_them_in_one_undoable_step()
+    {
+        var doc = Doc();
+        doc.DeleteFields(new[] { 2, 4 }); // 100 and 650
+
+        Assert.Equal(new[] { "001", "008", "245" },
+            doc.Record.Fields.Select(f => f.Tag).ToArray());
+
+        doc.Undo(); // one step brings both back
+        Assert.Equal(new[] { "001", "008", "100", "245", "650" },
+            doc.Record.Fields.Select(f => f.Tag).ToArray());
+    }
+
+    [Fact]
+    public void DeleteFields_ignores_the_leader_and_duplicates_and_out_of_order()
+    {
+        var doc = Doc();
+        doc.DeleteFields(new[] { 4, -1, 2, 2 }); // leader ignored, dup collapsed, any order
+
+        Assert.Equal(new[] { "001", "008", "245" },
+            doc.Record.Fields.Select(f => f.Tag).ToArray());
+    }
+
+    [Fact]
+    public void DeleteFields_with_nothing_to_do_records_no_undo()
+    {
+        var doc = Doc();
+        doc.DeleteFields(new[] { -1 }); // only the leader — a no-op
+        Assert.False(doc.CanUndo);
+        Assert.Equal(5, doc.Record.Fields.Count);
+    }
+
     // ---------- undo / redo ----------
 
     [Fact]

@@ -57,6 +57,9 @@ public sealed class MainForm : Form
     private bool _syncingBase;
     private EditorDocument? _currentDoc; // the record showing in the editor
     private bool _rendering;             // grid is being rebuilt; ignore its edit events
+    private bool _resumeEditAfterRender; // a structural edit re-rendered mid-typing; drop back into the cell
+    private MarcField? _fieldClipboard;      // Ctrl+T copy field / Alt+T paste
+    private MarcSubfield? _subfieldClipboard; // Ctrl+S copy subfield / Alt+S paste
 
     private string CurrentBase => _searchBase.SelectedIndex == 1 ? "AUT" : "BIB";
 
@@ -74,8 +77,10 @@ public sealed class MainForm : Form
         // Catalogue commands are menu-only (§6.2: record commands own the keyboard).
         _commands.Add(new Command { Id = "catalogue.new", Name = "&New Catalogue...", Execute = NewCatalog });
         _commands.Add(new Command { Id = "catalogue.open", Name = "&Open Catalogue...", DefaultKey = "Ctrl+O", Execute = OpenCatalogDialog });
-        _commands.Add(new Command { Id = "catalogue.import-folder", Name = "&Import Folder...", Execute = ImportFolder });
-        _commands.Add(new Command { Id = "catalogue.marc-out", Name = "Set MARC &Output Folder...", Execute = SetMarcOutFolder });
+        _commands.Add(new Command { Id = "catalogue.import-file", Name = "&Import Records...", Execute = ImportFiles });
+        _commands.Add(new Command { Id = "catalogue.import-folder", Name = "Import Fol&der...", Execute = ImportFolder });
+        _commands.Add(new Command { Id = "catalogue.marc-out", Name = "Set &BIB Output Folder...", Execute = () => SetMarcOutFolder("BIB") });
+        _commands.Add(new Command { Id = "catalogue.marc-out-aut", Name = "Set &Authority Output Folder...", Execute = () => SetMarcOutFolder("AUT") });
         _commands.Add(new Command { Id = "catalogue.export-base", Name = "Export &Base...", Execute = ExportBase });
         _commands.Add(new Command { Id = "catalogue.export-selected", Name = "Export &Selected...", Execute = ExportSelected });
         _commands.Add(new Command { Id = "app.exit", Name = "E&xit", DefaultKey = "Alt+F4", Execute = Close });
@@ -85,14 +90,20 @@ public sealed class MainForm : Form
         _commands.Add(new Command { Id = "help.about", Name = "&About Apud", Execute = ShowAbout });
         // Editor commands (Module 6 steps 3-7). §6.2: record commands own the keyboard.
         _commands.Add(new Command { Id = "record.new", Name = "&New Record / Copy", DefaultKey = "Ctrl+N", Execute = NewRecord });
-        _commands.Add(new Command { Id = "record.save-draft", Name = "&Save Draft", Context = CommandContext.Editor, DefaultKey = "Ctrl+S", Execute = SaveDraft });
-        _commands.Add(new Command { Id = "record.save-template", Name = "Save as &Template...", Context = CommandContext.Editor, DefaultKey = "Ctrl+T", Execute = SaveTemplate });
+        _commands.Add(new Command { Id = "record.save-draft", Name = "&Save Draft", Context = CommandContext.Editor, DefaultKey = "Ctrl+D", Execute = SaveDraft });
+        _commands.Add(new Command { Id = "record.save-template", Name = "Save as &Template...", Context = CommandContext.Editor, DefaultKey = "Ctrl+Shift+T", Execute = SaveTemplate });
         _commands.Add(new Command { Id = "record.undo", Name = "&Undo", Context = CommandContext.Editor, DefaultKey = "Ctrl+Z", Execute = UndoEdit });
         _commands.Add(new Command { Id = "record.redo", Name = "&Redo", Context = CommandContext.Editor, DefaultKey = "Ctrl+Y", Execute = RedoEdit });
+        _commands.Add(new Command { Id = "field.edit", Name = "&Edit Field (cursor)", Context = CommandContext.Editor, DefaultKey = "Insert", Execute = BeginEditCurrentCell });
         _commands.Add(new Command { Id = "field.new", Name = "New &Field", Context = CommandContext.Editor, DefaultKey = "F6", Execute = NewField });
         _commands.Add(new Command { Id = "subfield.new", Name = "New Su&bfield", Context = CommandContext.Editor, DefaultKey = "F7", Execute = NewSubfield });
         _commands.Add(new Command { Id = "field.delete", Name = "&Delete Field", Context = CommandContext.Editor, DefaultKey = "Ctrl+F5", Execute = DeleteCurrentField });
+        _commands.Add(new Command { Id = "field.delete-selected", Name = "Delete Se&lected Fields", Context = CommandContext.Editor, DefaultKey = "Ctrl+Shift+F5", Execute = DeleteSelectedFields });
         _commands.Add(new Command { Id = "subfield.delete", Name = "Delete Subf&ield", Context = CommandContext.Editor, DefaultKey = "Ctrl+F7", Execute = DeleteCurrentSubfield });
+        _commands.Add(new Command { Id = "field.copy", Name = "&Copy Field", Context = CommandContext.Editor, DefaultKey = "Ctrl+T", Execute = CopyField });
+        _commands.Add(new Command { Id = "field.paste", Name = "&Paste Field", Context = CommandContext.Editor, DefaultKey = "Alt+T", Execute = PasteField });
+        _commands.Add(new Command { Id = "subfield.copy", Name = "Copy Subfield", Context = CommandContext.Editor, DefaultKey = "Ctrl+S", Execute = CopySubfield });
+        _commands.Add(new Command { Id = "subfield.paste", Name = "Paste Subfield", Context = CommandContext.Editor, DefaultKey = "Alt+S", Execute = PasteSubfield });
         // Stubs wired, not built — keys rebindable from day one (step 7).
         _commands.Add(new Command { Id = "field.fixed-edit", Name = "Edit Fixed Field by &Position...", Context = CommandContext.Editor, DefaultKey = "Ctrl+F3", Execute = EditFixedField });
         _commands.Add(new Command { Id = "field.validate", Name = "Browse && Link &Heading", Context = CommandContext.Editor, DefaultKey = "Ctrl+F4", Execute = BrowseAndLinkHeading });
@@ -109,8 +120,10 @@ public sealed class MainForm : Form
         file.DropDownItems.Add(MenuItem("catalogue.new"));
         file.DropDownItems.Add(MenuItem("catalogue.open"));
         file.DropDownItems.Add(new ToolStripSeparator());
+        file.DropDownItems.Add(MenuItem("catalogue.import-file"));
         file.DropDownItems.Add(MenuItem("catalogue.import-folder"));
         file.DropDownItems.Add(MenuItem("catalogue.marc-out"));
+        file.DropDownItems.Add(MenuItem("catalogue.marc-out-aut"));
         file.DropDownItems.Add(MenuItem("catalogue.export-base"));
         file.DropDownItems.Add(MenuItem("catalogue.export-selected"));
         file.DropDownItems.Add(new ToolStripSeparator());
@@ -131,10 +144,16 @@ public sealed class MainForm : Form
         record.DropDownItems.Add(MenuItem("record.undo"));
         record.DropDownItems.Add(MenuItem("record.redo"));
         record.DropDownItems.Add(new ToolStripSeparator());
+        record.DropDownItems.Add(MenuItem("field.edit"));
         record.DropDownItems.Add(MenuItem("field.new"));
         record.DropDownItems.Add(MenuItem("subfield.new"));
         record.DropDownItems.Add(MenuItem("field.delete"));
+        record.DropDownItems.Add(MenuItem("field.delete-selected"));
         record.DropDownItems.Add(MenuItem("subfield.delete"));
+        record.DropDownItems.Add(MenuItem("field.copy"));
+        record.DropDownItems.Add(MenuItem("field.paste"));
+        record.DropDownItems.Add(MenuItem("subfield.copy"));
+        record.DropDownItems.Add(MenuItem("subfield.paste"));
         record.DropDownItems.Add(new ToolStripSeparator());
         record.DropDownItems.Add(MenuItem("field.fixed-edit"));
         record.DropDownItems.Add(MenuItem("field.validate"));
@@ -212,6 +231,9 @@ public sealed class MainForm : Form
         _searchBox.KeyDown += (_, e) =>
         {
             if (e.KeyCode == Keys.Enter) { RunSearch(); e.SuppressKeyPress = true; }
+            // Down arrow steps straight into the results — no reaching for the
+            // mouse to pick a hit (user request 2026-08-01).
+            else if (e.KeyCode == Keys.Down && _resultsList!.Items.Count > 0) { FocusResults(); e.SuppressKeyPress = true; }
         };
         var searchButton = new Button { Text = "Search", Width = 60 };
         searchButton.Click += (_, _) => RunSearch();
@@ -253,6 +275,14 @@ public sealed class MainForm : Form
         _resultsList.KeyDown += (_, e) =>
         {
             if (e.KeyCode == Keys.Enter) { OpenSelectedResult(); e.SuppressKeyPress = true; }
+            // Up from the first hit hands focus back to the search box, so the
+            // whole search→pick loop stays on the keyboard.
+            else if (e.KeyCode == Keys.Up && _resultsList.FocusedItem?.Index == 0)
+            {
+                _searchBox.Focus();
+                _searchBox.SelectionStart = _searchBox.TextLength;
+                e.SuppressKeyPress = true;
+            }
         };
 
         _historyList = new ListView
@@ -302,7 +332,11 @@ public sealed class MainForm : Form
             AllowUserToResizeRows = false,
             RowHeadersVisible = false,
             SelectionMode = DataGridViewSelectionMode.CellSelect,
-            MultiSelect = false,
+            // Multi-select so a range of fields can be picked (Shift/Ctrl-click or
+            // Shift+arrows) and deleted at once — e.g. pruning a pasted-in record
+            // down to a new authority (user request 2026-08-01). Single-cell
+            // editing is unaffected.
+            MultiSelect = true,
             BackgroundColor = SystemColors.Window,
             BorderStyle = BorderStyle.None,
             CellBorderStyle = DataGridViewCellBorderStyle.None,
@@ -319,7 +353,7 @@ public sealed class MainForm : Form
         var mono = new Font("Consolas", 9.75f);
         _viewer.Columns.Add(NewColumn("name", 140, italic: true, color: Color.Maroon,
             font: new Font("Segoe UI", 8.25f), readOnly: true));
-        _viewer.Columns.Add(NewColumn("tag", 42, font: mono, bold: true, underline: true));
+        _viewer.Columns.Add(NewColumn("tag", 42, font: mono, bold: true, underline: true, color: Color.Gray));
         _viewer.Columns.Add(NewColumn("ind", 34, font: mono));
         _viewer.Columns.Add(NewColumn("code", 26, font: mono, bold: true, underline: true));
         var value = NewColumn("value", 200, font: mono, bold: true);
@@ -678,6 +712,18 @@ public sealed class MainForm : Form
         _resultsList.EndUpdate();
     }
 
+    /// <summary>Moves the keyboard into the results list, selecting the first hit
+    /// if none is selected — the entry point for arrow-key navigation.</summary>
+    private void FocusResults()
+    {
+        if (_resultsList.Items.Count == 0) return;
+        var item = _resultsList.SelectedItems.Count > 0 ? _resultsList.SelectedItems[0] : _resultsList.Items[0];
+        item.Selected = true;
+        item.Focused = true;
+        _resultsList.EnsureVisible(item.Index);
+        _resultsList.Focus();
+    }
+
     private void RefreshHistoryList()
     {
         _historyList.BeginUpdate();
@@ -745,7 +791,7 @@ public sealed class MainForm : Form
     {
         if (_openList.SelectedItems.Count == 0) return;
         _currentDoc = _openList.SelectedItems[0].Tag as EditorDocument;
-        RenderRecord();
+        RenderRecord(preservePosition: false);
         ShowRecordView();
     }
 
@@ -790,12 +836,20 @@ public sealed class MainForm : Form
 
     // ---------- editor (Module 6 steps 3-6) ----------
 
-    /// <summary>Redraws the grid and header from the current document. Cheap
-    /// (a record is a few dozen rows), so structural edits just call it again.</summary>
-    private void RenderRecord()
+    /// <summary>Redraws the grid and header from the current document. When
+    /// <paramref name="preservePosition"/> is set the cursor stays on the same
+    /// field/subfield/column across the rebuild — so a structural edit made while
+    /// typing (retag, first subfield) does not fling the cursor to the top and
+    /// force a click (user, 2026-08-01). Switching to a different record passes
+    /// false, since the old position means nothing in the new record.</summary>
+    private void RenderRecord(bool preservePosition = true)
     {
         if (_currentDoc is null) { _recordHeader.Text = ""; _viewer.Rows.Clear(); return; }
         var doc = _currentDoc;
+
+        var keep = preservePosition ? CaptureCell() : null;
+        bool resume = _resumeEditAfterRender && _viewer.ContainsFocus;
+        _resumeEditAfterRender = false;
 
         _rendering = true;
         UpdateHeader();
@@ -809,6 +863,36 @@ public sealed class MainForm : Form
         }
         _viewer.ClearSelection();
         _rendering = false;
+
+        if (keep is { } k && RestoreCell(k))
+        {
+            if (resume && _viewer.CurrentCell is { ReadOnly: false }) _viewer.BeginEdit(false);
+        }
+    }
+
+    /// <summary>The cursor's logical position (field/subfield/column), stable
+    /// across a rebuild because it is stored by model index, not grid row.</summary>
+    private (int FieldIndex, int SubfieldIndex, string Column)? CaptureCell()
+    {
+        var cell = _viewer.CurrentCell;
+        if (cell?.OwningRow.Tag is DisplayRow r)
+            return (r.FieldIndex, r.SubfieldIndex, _viewer.Columns[cell.ColumnIndex].Name);
+        return null;
+    }
+
+    /// <summary>Puts the cursor back on a captured position after a rebuild;
+    /// false when that field/subfield no longer exists (e.g. it was deleted).</summary>
+    private bool RestoreCell((int FieldIndex, int SubfieldIndex, string Column) pos)
+    {
+        foreach (DataGridViewRow gridRow in _viewer.Rows)
+        {
+            if (gridRow.Tag is DisplayRow r && r.FieldIndex == pos.FieldIndex && r.SubfieldIndex == pos.SubfieldIndex)
+            {
+                _viewer.CurrentCell = gridRow.Cells[pos.Column];
+                return true;
+            }
+        }
+        return false;
     }
 
     private void UpdateHeader()
@@ -882,7 +966,14 @@ public sealed class MainForm : Form
 
         if (error != null) SetMessage(error);
         UpdateHeader();
-        if (structural) BeginInvoke(RenderRecord);
+        if (structural)
+        {
+            // The grid has already advanced the cursor (Tab/Enter) to the next
+            // cell; re-render preserving that spot and drop back into it so the
+            // tag→indicators→code→value flow stays on the keyboard (task 5).
+            _resumeEditAfterRender = true;
+            BeginInvoke(() => RenderRecord());
+        }
     }
 
     /// <summary>Caps the editing box by column to the fixed MARC widths: a tag
@@ -892,13 +983,29 @@ public sealed class MainForm : Form
     private void ViewerEditingControlShowing(object? sender, DataGridViewEditingControlShowingEventArgs e)
     {
         if (e.Control is not TextBox tb) return;
-        tb.MaxLength = _viewer.CurrentCell?.OwningColumn.Name switch
+        string? col = _viewer.CurrentCell?.OwningColumn.Name;
+        tb.MaxLength = col switch
         {
             "tag" => 3,
             "ind" => 2,
             "code" => 1,
             _ => 0, // 0 = unlimited (value and control-data cells)
         };
+
+        // The three fixed micro-cells (tag 3, indicators 2, code 1) open with
+        // their content SELECTED, so the first keystroke replaces it — otherwise a
+        // brand-new field's placeholder ("   " / "__") already fills the cell to
+        // its max length and the cataloguer must delete those "bars" before typing
+        // (user report 2026-08-01). The larger value/control cells keep the
+        // text-editor feel: a caret at the end, nothing selected.
+        bool micro = col is "tag" or "ind" or "code";
+        BeginInvoke(() =>
+        {
+            if (tb.IsDisposed || !tb.IsHandleCreated) return;
+            if (micro) { tb.SelectAll(); return; }
+            tb.SelectionStart = tb.Text.Length;
+            tb.SelectionLength = 0;
+        });
     }
 
     private static string Caret(string s) => s.Replace(' ', '^');
@@ -929,7 +1036,9 @@ public sealed class MainForm : Form
             ? (row.FieldIndex, row.SubfieldIndex)
             : null;
 
-    /// <summary>Puts the cursor on a field/subfield after a structural change.</summary>
+    /// <summary>Puts the cursor on a field/subfield after a structural change and
+    /// focuses the grid, so the cursor visibly lands there — e.g. on the field
+    /// below after a delete — instead of leaving focus adrift (task 2a).</summary>
     private void SelectCell(int fieldIndex, int subfieldIndex, string column)
     {
         foreach (DataGridViewRow gridRow in _viewer.Rows)
@@ -937,9 +1046,39 @@ public sealed class MainForm : Form
             if (gridRow.Tag is DisplayRow r && r.FieldIndex == fieldIndex && r.SubfieldIndex == subfieldIndex)
             {
                 _viewer.CurrentCell = gridRow.Cells[column];
+                _viewer.Focus();
                 return;
             }
         }
+    }
+
+    /// <summary>Lands the cursor on a field's first row (its tag cell) whatever the
+    /// field's shape — the reliable "put me on this field" after a multi-field
+    /// delete, where the surviving field may be a data field with subfields.</summary>
+    private void SelectFieldRow(int fieldIndex)
+    {
+        foreach (DataGridViewRow gridRow in _viewer.Rows)
+        {
+            if (gridRow.Tag is DisplayRow r && r.FieldIndex == fieldIndex)
+            {
+                _viewer.CurrentCell = gridRow.Cells["tag"];
+                _viewer.Focus();
+                return;
+            }
+        }
+    }
+
+    /// <summary>Insert: drop into the current cell with a caret at the end — the
+    /// "pulsing bar", not a highlighted value — so the record reads as a text
+    /// editor (task 1). Read-only cells (a field name, a control field's
+    /// indicators) simply say so.</summary>
+    private void BeginEditCurrentCell()
+    {
+        if (_currentDoc is null) { SetMessage("No record on screen."); return; }
+        if (_viewer.CurrentCell is not { } cell) { SetMessage("Stand on a field first."); return; }
+        if (cell.ReadOnly) { SetMessage("Nothing to type here — move to the tag, indicators, code or value."); return; }
+        _viewer.Focus();
+        _viewer.BeginEdit(false); // false = caret, not select-all (EditingControlShowing puts it at the end)
     }
 
     private void NewField()
@@ -950,7 +1089,8 @@ public sealed class MainForm : Form
         int at = _currentDoc.InsertBlankFieldAfter(after);
         RenderRecord();
         SelectCell(at, -1, "tag");
-        SetMessage("New field — type its tag.");
+        _viewer.BeginEdit(false); // caret in the tag cell — start typing at once (task 5)
+        SetMessage("New field — type its tag, then Tab through indicators, code and value.");
     }
 
     private void NewSubfield()
@@ -966,6 +1106,7 @@ public sealed class MainForm : Form
         if (error != null) { SetMessage(error); return; }
         RenderRecord();
         SelectCell(at.FieldIndex, index, "code");
+        _viewer.BeginEdit(false); // caret in the new subfield code — start typing at once
     }
 
     private void DeleteCurrentField()
@@ -982,6 +1123,41 @@ public sealed class MainForm : Form
         SelectCell(Math.Min(at.FieldIndex, _currentDoc.Record.Fields.Count - 1), -1, "tag");
     }
 
+    /// <summary>Ctrl+Shift+F5: delete every field that has a selected cell in one
+    /// undoable step — the bulk prune for a pasted-in record (user request
+    /// 2026-08-01). With one field selected it behaves like Ctrl+F5; several ask
+    /// first. The leader is never touched.</summary>
+    private void DeleteSelectedFields()
+    {
+        if (_currentDoc is null) { SetMessage("No record on screen."); return; }
+        _viewer.EndEdit();
+
+        var indices = _viewer.SelectedCells.Cast<DataGridViewCell>()
+            .Select(c => c.OwningRow.Tag as DisplayRow)
+            .Where(r => r is { FieldIndex: >= 0 })
+            .Select(r => r!.FieldIndex)
+            .Distinct().ToList();
+
+        if (indices.Count == 0)
+        {
+            SetMessage("Select one or more fields first (the leader cannot be deleted).");
+            return;
+        }
+        if (indices.Count > 1 && MessageBox.Show(this,
+                $"Delete {indices.Count} selected fields?",
+                "Delete Fields", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+            return;
+
+        int land = indices.Min(); // the field the survivors shift up into
+        _currentDoc.DeleteFields(indices);
+        RenderRecord();
+        UpdateSidebarItem(_currentDoc);
+        UpdateHeader();
+        if (_currentDoc.Record.Fields.Count > 0)
+            SelectFieldRow(Math.Min(land, _currentDoc.Record.Fields.Count - 1));
+        SetMessage($"Deleted {indices.Count} field(s).");
+    }
+
     private void DeleteCurrentSubfield()
     {
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
@@ -995,6 +1171,77 @@ public sealed class MainForm : Form
         RenderRecord();
         int left = _currentDoc.Record.Fields[at.FieldIndex].Subfields.Count;
         SelectCell(at.FieldIndex, left == 0 ? -1 : Math.Min(at.SubfieldIndex, left - 1), "code");
+    }
+
+    // ---------- copy / paste field & subfield (user request 2026-08-01) ----------
+
+    /// <summary>Ctrl+T: copy the whole field under the cursor onto the field
+    /// clipboard (a deep copy, so later edits to the record don't change it). The
+    /// clipboard survives switching records, so a field can be pasted into another
+    /// record.</summary>
+    private void CopyField()
+    {
+        if (_currentDoc is null) { SetMessage("No record on screen."); return; }
+        _viewer.EndEdit();
+        if (CurrentRef() is not { } at || at.FieldIndex < 0)
+        {
+            SetMessage("Stand in a field first (the leader cannot be copied).");
+            return;
+        }
+        _fieldClipboard = _currentDoc.CopyField(at.FieldIndex);
+        SetMessage($"Copied field {_currentDoc.Record.Fields[at.FieldIndex].Tag} — Alt+T pastes it.");
+    }
+
+    /// <summary>Alt+T: paste the copied field as a new field just below the cursor
+    /// (a fresh clone each time). Never reorders — like every other editor edit,
+    /// the cataloguer places it.</summary>
+    private void PasteField()
+    {
+        if (_currentDoc is null) { SetMessage("No record on screen."); return; }
+        if (_fieldClipboard is null) { SetMessage("No field copied yet — Ctrl+T copies the current field."); return; }
+        _viewer.EndEdit();
+        int after = CurrentRef()?.FieldIndex ?? _currentDoc.Record.Fields.Count - 1;
+        int at = _currentDoc.PasteFieldAfter(after, _fieldClipboard);
+        RenderRecord();
+        UpdateSidebarItem(_currentDoc);
+        UpdateHeader();
+        SelectCell(at, -1, "tag");
+        SetMessage($"Pasted field {_fieldClipboard.Tag}.");
+    }
+
+    /// <summary>Ctrl+S: copy the subfield under the cursor onto the subfield
+    /// clipboard.</summary>
+    private void CopySubfield()
+    {
+        if (_currentDoc is null) { SetMessage("No record on screen."); return; }
+        _viewer.EndEdit();
+        if (CurrentRef() is not { } at || at.FieldIndex < 0 || at.SubfieldIndex < 0)
+        {
+            SetMessage("Stand on a subfield first.");
+            return;
+        }
+        _subfieldClipboard = _currentDoc.CopySubfield(at.FieldIndex, at.SubfieldIndex);
+        SetMessage($"Copied subfield ‡{_subfieldClipboard.Code} — Alt+S pastes it.");
+    }
+
+    /// <summary>Alt+S: paste the copied subfield just after the cursor's subfield
+    /// (or at the top of the field when standing on an empty one).</summary>
+    private void PasteSubfield()
+    {
+        if (_currentDoc is null) { SetMessage("No record on screen."); return; }
+        if (_subfieldClipboard is null) { SetMessage("No subfield copied yet — Ctrl+S copies the current subfield."); return; }
+        _viewer.EndEdit();
+        if (CurrentRef() is not { } at || at.FieldIndex < 0)
+        {
+            SetMessage("Stand in a field first.");
+            return;
+        }
+        var (index, error) = _currentDoc.PasteSubfieldAfter(at.FieldIndex, at.SubfieldIndex, _subfieldClipboard);
+        if (error != null) { SetMessage(error); return; }
+        RenderRecord();
+        UpdateSidebarItem(_currentDoc);
+        SelectCell(at.FieldIndex, index, "value");
+        SetMessage($"Pasted subfield ‡{_subfieldClipboard.Code}.");
     }
 
     // ---------- fixed-field position editor (Module 7) ----------
@@ -1193,10 +1440,10 @@ public sealed class MainForm : Form
         string mirrorNote;
         try
         {
-            string? written = RecordMirror.Write(MarcOutFolder(), doc.Record);
+            string? written = RecordMirror.Write(MarcOutFolder(doc.Stored.Base), doc.Record);
             mirrorNote = written is not null
                 ? $" Wrote {Path.GetFileName(written)} to {Path.GetDirectoryName(written)}."
-                : " (no MARC output folder — File → Set MARC Output Folder to save .mrk files.)";
+                : $" (no MARC output folder — File → Set {doc.Stored.Base} Output Folder to save .mrk files.)";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -1281,38 +1528,50 @@ public sealed class MainForm : Form
     // ---------- MARC output folder ----------
 
     private const string MarcOutSetting = "marc_out_folder";
+    private const string MarcOutSettingAut = "marc_out_folder_aut";
 
-    /// <summary>The folder pushed records are mirrored to: the cataloguer's chosen
-    /// folder (persisted per catalogue) if set, else a MARC_OUT subfolder beside
-    /// the .db. Null only when no catalogue is open / it is in-memory.</summary>
-    private string? MarcOutFolder()
+    /// <summary>The settings key and default subfolder for a base. BIB and AUT
+    /// mirror to separate folders (user request 2026-08-01) — same mechanism as
+    /// bib, its own chosen folder — because their control numbers are numbered
+    /// independently and would otherwise collide (BIB 758.mrk vs AUT 758.mrk).</summary>
+    private static (string Key, string DefaultName) MarcOutSpec(string @base) => @base == "AUT"
+        ? (MarcOutSettingAut, RecordMirror.DefaultFolderNameAut)
+        : (MarcOutSetting, RecordMirror.DefaultFolderName);
+
+    /// <summary>The folder a base's pushed records are mirrored to: the
+    /// cataloguer's chosen folder (persisted per catalogue) if set, else a
+    /// MARC_OUT / MARC_OUT_AUT subfolder beside the .db. Null only when no
+    /// catalogue is open / it is in-memory.</summary>
+    private string? MarcOutFolder(string @base)
     {
-        string? configured = _repo?.GetSetting(MarcOutSetting);
+        var (key, defaultName) = MarcOutSpec(@base);
+        string? configured = _repo?.GetSetting(key);
         if (!string.IsNullOrWhiteSpace(configured)) return configured.Trim();
-        return RecordMirror.DefaultFolderFor(_catalogPath);
+        return RecordMirror.DefaultFolderFor(_catalogPath, defaultName);
     }
 
-    /// <summary>File → Set MARC Output Folder: pick the folder Apud writes each
-    /// pushed record's .mrk into. Stored in the catalogue's settings, so it is
-    /// remembered per catalogue. Cancelling leaves the current choice; picking the
-    /// same place is idempotent.</summary>
-    private void SetMarcOutFolder()
+    /// <summary>File → Set BIB / Authority Output Folder: pick the folder Apud
+    /// writes each pushed record's .mrk into for that base. Stored in the
+    /// catalogue's settings (remembered per catalogue). Cancelling leaves the
+    /// current choice; picking the same place is idempotent.</summary>
+    private void SetMarcOutFolder(string @base)
     {
         if (_repo is null) { SetMessage("Open a catalogue first."); return; }
 
-        string? current = _repo.GetSetting(MarcOutSetting);
+        var (key, defaultName) = MarcOutSpec(@base);
+        string? current = _repo.GetSetting(key);
         using var dialog = new FolderBrowserDialog
         {
-            Description = "Choose the folder Apud writes each pushed record to (as <001>.mrk).",
+            Description = $"Choose the folder Apud writes each pushed {@base} record to (as <001>.mrk).",
             UseDescriptionForTitle = true,
             SelectedPath = !string.IsNullOrWhiteSpace(current) && Directory.Exists(current)
                 ? current
-                : RecordMirror.DefaultFolderFor(_catalogPath) is string d && Directory.Exists(d) ? d : "",
+                : RecordMirror.DefaultFolderFor(_catalogPath, defaultName) is string d && Directory.Exists(d) ? d : "",
         };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
 
-        _repo.SetSetting(MarcOutSetting, dialog.SelectedPath);
-        SetMessage($"Pushed records will be written to {dialog.SelectedPath}.");
+        _repo.SetSetting(key, dialog.SelectedPath);
+        SetMessage($"Pushed {@base} records will be written to {dialog.SelectedPath}.");
     }
 
     /// <summary>Deletes the displayed record from the catalogue AND its
@@ -1352,7 +1611,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        try { RecordMirror.Delete(MarcOutFolder(), doc.Record.ControlNumber); }
+        try { RecordMirror.Delete(MarcOutFolder(doc.Stored.Base), doc.Record.ControlNumber); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             SetMessage($"Record {cn} deleted from the catalogue, but its .mrk file could not be removed: {ex.Message}");
@@ -1480,13 +1739,33 @@ public sealed class MainForm : Form
 
     // ---------- import ----------
 
+    /// <summary>File → Import Records: pick one or more .mrk files (e.g. a single
+    /// authority file MarcEdit converted into your Downloads) and import just
+    /// those (user request 2026-08-01 — the user, not the folder, decides the
+    /// scope). Each record routes to BIB or AUT by its leader, same as a folder
+    /// import.</summary>
+    private void ImportFiles()
+    {
+        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+
+        using var dialog = new OpenFileDialog
+        {
+            Title = "Import Records",
+            InitialDirectory = SuggestedFolder(),
+            Filter = "MARC text (*.mrk)|*.mrk|All files (*.*)|*.*",
+            Multiselect = true,
+        };
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+        var files = dialog.FileNames;
+        string source = files.Length == 1 ? files[0] : $"{files.Length} files";
+        RunImport(source, new ImportEngine(_repo).Analyze(files));
+    }
+
+    /// <summary>File → Import Folder: import every .mrk in a folder tree.</summary>
     private void ImportFolder()
     {
-        if (_repo is null)
-        {
-            SetMessage("Open a catalogue first.");
-            return;
-        }
+        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
 
         using var dialog = new FolderBrowserDialog
         {
@@ -1495,23 +1774,28 @@ public sealed class MainForm : Form
         };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
 
-        var engine = new ImportEngine(_repo);
-        var plan = engine.AnalyzeFolder(dialog.SelectedPath);
-        var report = plan.Report;
+        RunImport(dialog.SelectedPath, new ImportEngine(_repo).AnalyzeFolder(dialog.SelectedPath));
+    }
 
+    /// <summary>The shared analyze → wizard → commit path for both import
+    /// commands. The commit is one all-or-nothing transaction; Cancel writes
+    /// nothing.</summary>
+    private void RunImport(string source, ImportPlan plan)
+    {
+        var report = plan.Report;
         if (report.TotalRecords == 0)
         {
             MessageBox.Show(this, "No records found (no .mrk files, or all empty).",
-                "Import Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                "Import", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
 
-        using var wizard = new ImportWizardForm(dialog.SelectedPath, report);
+        using var wizard = new ImportWizardForm(source, report);
         if (wizard.ShowDialog(this) != DialogResult.OK) return; // nothing committed
 
         try
         {
-            var result = engine.Commit(plan, wizard.SelectedMode);
+            var result = new ImportEngine(_repo!).Commit(plan, wizard.SelectedMode);
             SetMessage($"Imported {result.RecordsImported} record(s) — BIB {result.BibCount}, AUT {result.AutCount}.");
         }
         catch (Microsoft.Data.Sqlite.SqliteException e)
@@ -1519,7 +1803,7 @@ public sealed class MainForm : Form
             // e.g. a record inserted between Analyze and Commit now collides;
             // the transaction rolled back — the catalogue is untouched.
             MessageBox.Show(this, $"Import failed and nothing was committed.\n\n{e.Message}",
-                "Import Folder", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                "Import", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 

@@ -188,8 +188,12 @@ public class KeymapTests
             Cmd("search.focus"), Cmd("record.new"), Cmd("record.save-draft", context: CommandContext.Editor),
             Cmd("record.save-template", context: CommandContext.Editor),
             Cmd("record.undo", context: CommandContext.Editor), Cmd("record.redo", context: CommandContext.Editor),
+            Cmd("field.edit", context: CommandContext.Editor),
             Cmd("field.new", context: CommandContext.Editor), Cmd("subfield.new", context: CommandContext.Editor),
-            Cmd("field.delete", context: CommandContext.Editor), Cmd("subfield.delete", context: CommandContext.Editor),
+            Cmd("field.delete", context: CommandContext.Editor),
+            Cmd("field.delete-selected", context: CommandContext.Editor), Cmd("subfield.delete", context: CommandContext.Editor),
+            Cmd("field.copy", context: CommandContext.Editor), Cmd("field.paste", context: CommandContext.Editor),
+            Cmd("subfield.copy", context: CommandContext.Editor), Cmd("subfield.paste", context: CommandContext.Editor),
             Cmd("field.fixed-edit", context: CommandContext.Editor), Cmd("field.validate", context: CommandContext.Editor),
             Cmd("record.validate", context: CommandContext.Editor), Cmd("record.push", context: CommandContext.Editor),
             Cmd("app.exit"));

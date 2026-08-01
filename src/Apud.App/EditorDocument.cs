@@ -172,6 +172,16 @@ public sealed class EditorDocument
     public void DeleteField(int fieldIndex) =>
         Apply(() => Record.Fields.RemoveAt(fieldIndex));
 
+    /// <summary>Deletes several fields in one undoable step (removed high-index
+    /// first so the earlier indices stay valid). The leader (-1) is ignored.
+    /// Used by "delete selected fields" when cleaning up a pasted-in record.</summary>
+    public void DeleteFields(IEnumerable<int> fieldIndices)
+    {
+        var ordered = fieldIndices.Where(i => i >= 0).Distinct().OrderByDescending(i => i).ToList();
+        if (ordered.Count == 0) return;
+        Apply(() => { foreach (int i in ordered) Record.Fields.RemoveAt(i); });
+    }
+
     /// <summary>Deletes one subfield; the field itself stays even at zero
     /// subfields (Ctrl+F5 is how a field goes away).</summary>
     public void DeleteSubfield(int fieldIndex, int subfieldIndex)
@@ -179,6 +189,41 @@ public sealed class EditorDocument
         var f = Record.Fields[fieldIndex];
         if (f.IsControl || subfieldIndex < 0) return;
         Apply(() => f.Subfields.RemoveAt(subfieldIndex));
+    }
+
+    // ---------- copy / paste field & subfield (user request 2026-08-01) ----------
+
+    /// <summary>A deep, independent copy of a field for the clipboard (read-only —
+    /// no mutation, nothing on the undo stack). The leader is not a field and
+    /// cannot be copied here.</summary>
+    public MarcField CopyField(int fieldIndex) => CloneField(Record.Fields[fieldIndex]);
+
+    /// <summary>Inserts a fresh clone of a copied field after the given one
+    /// (-1 = at the top) and returns its index. Cloned on the way in, so pasting
+    /// the same clipboard field twice yields two independent fields.</summary>
+    public int PasteFieldAfter(int fieldIndex, MarcField field)
+    {
+        int at = Math.Min(fieldIndex + 1, Record.Fields.Count);
+        Apply(() => Record.Fields.Insert(at, CloneField(field)));
+        return at;
+    }
+
+    /// <summary>A deep, independent copy of a subfield for the clipboard.</summary>
+    public MarcSubfield CopySubfield(int fieldIndex, int subfieldIndex)
+    {
+        var s = Record.Fields[fieldIndex].Subfields[subfieldIndex];
+        return new MarcSubfield(s.Code, s.Value);
+    }
+
+    /// <summary>Inserts a clone of a copied subfield after the given one (-1 = at
+    /// the top) and returns its index; error line on a control field.</summary>
+    public (int Index, string? Error) PasteSubfieldAfter(int fieldIndex, int subfieldIndex, MarcSubfield subfield)
+    {
+        var f = Record.Fields[fieldIndex];
+        if (f.IsControl) return (-1, $"{f.Tag} is a control field — it has no subfields.");
+        int at = Math.Min(subfieldIndex + 1, f.Subfields.Count);
+        Apply(() => f.Subfields.Insert(at, new MarcSubfield(subfield.Code, subfield.Value)));
+        return (at, null);
     }
 
     // ---------- undo / redo ----------

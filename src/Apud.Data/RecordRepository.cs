@@ -454,13 +454,21 @@ public sealed class RecordRepository
     /// the top, so it cannot collide, reuse, or backfill his manual gaps).
     /// Non-numeric 001s cast to 0 in SQLite and so never raise the ceiling.
     /// </summary>
-    public long MaxControlNumber(string @base)
+    public long MaxControlNumber(string @base) => MaxControlNumber(@base, 0);
+
+    /// <summary>As above, but not counting the record with <paramref name="exceptId"/>
+    /// (pass 0 to count them all). Used for AUT push, where the record being
+    /// re-pushed must not raise its own ceiling: delete an authority's 001 in an
+    /// otherwise-empty base and the next number restarts at 1, instead of the
+    /// record's own old number + 1 (user, 2026-08-01).</summary>
+    public long MaxControlNumber(string @base, long exceptId)
     {
         using var cmd = _db.Connection.CreateCommand();
         cmd.CommandText =
             "SELECT MAX(CAST(control_number AS INTEGER)) FROM record " +
-            "WHERE base = $b AND control_number IS NOT NULL";
+            "WHERE base = $b AND control_number IS NOT NULL AND id <> $id";
         cmd.Parameters.AddWithValue("$b", @base);
+        cmd.Parameters.AddWithValue("$id", exceptId);
         var result = cmd.ExecuteScalar();
         return result is long v ? v : 0;
     }

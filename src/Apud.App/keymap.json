@@ -10,20 +10,27 @@
 // Plain unmodified letters/digits only fire while no text box has the cursor.
 //
 // Menu-only commands (bindable here if you want keys for them):
-//   catalogue.new, catalogue.import-folder, catalogue.export-base,
+//   catalogue.new, catalogue.import-file, catalogue.import-folder,
+//   catalogue.marc-out, catalogue.marc-out-aut, catalogue.export-base,
 //   catalogue.export-selected, base.bib, base.aut, help.about
 {
   "catalogue.open": "Ctrl+O",
   "search.focus": "F2",
   "record.new": "Ctrl+N",
-  "record.save-draft": "Ctrl+S",
-  "record.save-template": "Ctrl+T",
+  "record.save-draft": "Ctrl+D",
+  "record.save-template": "Ctrl+Shift+T",
   "record.undo": "Ctrl+Z",
   "record.redo": "Ctrl+Y",
+  "field.edit": "Insert",
   "field.new": "F6",
   "subfield.new": "F7",
   "field.delete": "Ctrl+F5",
+  "field.delete-selected": "Ctrl+Shift+F5",
   "subfield.delete": "Ctrl+F7",
+  "field.copy": "Ctrl+T",
+  "field.paste": "Alt+T",
+  "subfield.copy": "Ctrl+S",
+  "subfield.paste": "Alt+S",
   "field.fixed-edit": "Ctrl+F3",
   "field.validate": "Ctrl+F4",
   "record.validate": "Ctrl+W",

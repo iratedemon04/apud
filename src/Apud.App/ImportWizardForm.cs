@@ -26,7 +26,7 @@ public sealed class ImportWizardForm : Form
     {
         _report = report;
 
-        Text = "Import Folder";
+        Text = "Import Records";
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
         MaximizeBox = false;
