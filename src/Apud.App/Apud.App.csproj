@@ -16,6 +16,7 @@
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationIcon>..\..\resources\apud.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
