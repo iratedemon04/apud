@@ -11,11 +11,12 @@ namespace Apud.App;
 /// time, and a record's file is removed when the record is deleted.
 ///
 /// The folder is chosen by the cataloguer (File → Set MARC Output Folder…, stored
-/// per catalogue in the <c>setting</c> table); when none is set it defaults to a
-/// <c>MARC_OUT</c> subfolder beside the .db. This is a deliberate, user-approved
-/// exception to the "creates nothing on its own" rule (Decisions): the folder is
-/// made on demand and files are written without asking, because that is exactly
-/// the workflow he asked for. It only ever touches that output folder.
+/// per catalogue in the <c>setting</c> table); when none is set, nothing is
+/// mirrored and the record lives only in the .db (user request 2026-08-01). When a
+/// folder IS set, this is a deliberate, user-approved exception to the "creates
+/// nothing on its own" rule (Decisions): the folder is made on demand and files are
+/// written without asking, because that is exactly the workflow he asked for. It
+/// only ever touches that output folder.
 /// </summary>
 public static class RecordMirror
 {

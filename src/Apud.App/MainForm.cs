@@ -1662,15 +1662,15 @@ public sealed class MainForm : Form
         : (MarcOutSetting, RecordMirror.DefaultFolderName);
 
     /// <summary>The folder a base's pushed records are mirrored to: the
-    /// cataloguer's chosen folder (persisted per catalogue) if set, else a
-    /// MARC_OUT / MARC_OUT_AUT subfolder beside the .db. Null only when no
-    /// catalogue is open / it is in-memory.</summary>
+    /// cataloguer's chosen folder (persisted per catalogue) if set, else null —
+    /// meaning no .mrk is written and the record lives only in the .db (user
+    /// request 2026-08-01: an unset folder mirrors nothing, rather than defaulting
+    /// to a MARC_OUT subfolder beside the .db).</summary>
     private string? MarcOutFolder(string @base)
     {
-        var (key, defaultName) = MarcOutSpec(@base);
+        var (key, _) = MarcOutSpec(@base);
         string? configured = _repo?.GetSetting(key);
-        if (!string.IsNullOrWhiteSpace(configured)) return configured.Trim();
-        return RecordMirror.DefaultFolderFor(_catalogPath, defaultName);
+        return string.IsNullOrWhiteSpace(configured) ? null : configured.Trim();
     }
 
     /// <summary>File → Set BIB / Authority Output Folder: pick the folder Apud
