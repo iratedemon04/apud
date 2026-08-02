@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <Content Include="tagnames.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="taghelp.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="keymap.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="profile-bib.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="profile-aut.json" CopyToOutputDirectory="PreserveNewest" />

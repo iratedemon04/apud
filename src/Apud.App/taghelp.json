@@ -1,0 +1,19 @@
+// taghelp.json — offline field help shown by F1 (Field Help), Module 10.
+//
+// This file is OPTIONAL and lets you reword or extend Apud's built-in help.
+//   - Format: a JSON object of "tag": "help text" pairs. "LDR" is the leader.
+//   - Any tag you list here OVERRIDES the built-in paragraph for that tag.
+//   - A tag you DON'T list keeps its built-in help; a tag with no built-in help
+//     falls back to its name from tagnames.json.
+//   - Comments (// and /* */) and trailing commas are allowed.
+//   - If this file is missing, unreadable, or malformed, Apud reports one line in
+//     the message bar and uses its built-in help — it never fails to start.
+//
+// The entries below are a few of the shipped defaults, copied here so you can see
+// the shape. Delete any you don't want to change; edit the text to your house style.
+{
+  "245": "Title Statement — the transcribed title. $a title proper, $b remainder/subtitle, $c statement of responsibility. Ind1: 1 when a 1XX author is present. Ind2: number of leading characters to ignore in filing (4 for \"The \"). Mandatory, not repeatable.",
+  "650": "Subject Added Entry — Topical Term. $a topic, $v form, $x general subdivision, $y period, $z place. Ind2 names the thesaurus. Controlled — Ctrl+F4 links it to the authority base. Repeatable; Apud keeps your subject order.",
+  "700": "Added Entry — Personal Name — an additional author, editor, translator. Same subfields as 100; $e/$4 states the role. Controlled (Ctrl+F4). Repeatable.",
+  "020": "International Standard Book Number. $a ISBN, $q qualifier, $c terms of availability, $z cancelled/invalid ISBN. Repeatable."
+}

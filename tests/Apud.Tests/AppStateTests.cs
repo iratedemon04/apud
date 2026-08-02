@@ -30,4 +30,19 @@ public class AppStateTests : IDisposable
         File.WriteAllText(_path, "{ this is not json");
         Assert.Null(AppState.LoadFrom(_path).LastFolder);
     }
+
+    [Fact]
+    public void Round_trips_the_first_run_flag()
+    {
+        new AppState { FirstRunDone = true }.SaveTo(_path);
+        Assert.True(AppState.LoadFrom(_path).FirstRunDone);
+    }
+
+    [Fact]
+    public void First_run_flag_defaults_false_when_absent()
+    {
+        Assert.False(AppState.LoadFrom(_path).FirstRunDone);              // missing file
+        File.WriteAllText(_path, "{ this is not json");
+        Assert.False(AppState.LoadFrom(_path).FirstRunDone);              // corrupt file
+    }
 }

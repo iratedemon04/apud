@@ -51,6 +51,7 @@ public sealed class MainForm : Form
     private readonly CommandRegistry _commands = new();
     private readonly Keymap _keymap;
     private readonly AppState _appState = AppState.Load();
+    private FieldHelpForm? _fieldHelp;   // the F1 help panel, created on first use, reused thereafter
 
     private ApudDatabase? _db;
     private RecordRepository? _repo;
@@ -88,6 +89,8 @@ public sealed class MainForm : Form
         _commands.Add(new Command { Id = "base.bib", Name = "&BIB — Bibliographic", Execute = () => SetBase("BIB") });
         _commands.Add(new Command { Id = "base.aut", Name = "&AUT — Authority", Execute = () => SetBase("AUT") });
         _commands.Add(new Command { Id = "search.focus", Name = "&Search", DefaultKey = "F2", Execute = ShowSearchView });
+        _commands.Add(new Command { Id = "help.field", Name = "&Field Help", DefaultKey = "F1", Execute = ShowFieldHelp });
+        _commands.Add(new Command { Id = "help.setup", Name = "&Setup Wizard...", Execute = ShowSetupWizard });
         _commands.Add(new Command { Id = "help.about", Name = "&About Apud", Execute = ShowAbout });
         // Editor commands (Module 6 steps 3-7). §6.2: record commands own the keyboard.
         _commands.Add(new Command { Id = "record.new", Name = "&New Record / Copy", DefaultKey = "Ctrl+N", Execute = NewRecord });
@@ -164,6 +167,9 @@ public sealed class MainForm : Form
         record.DropDownItems.Add(MenuItem("record.delete"));
 
         var help = new ToolStripMenuItem("&Help");
+        help.DropDownItems.Add(MenuItem("help.field"));
+        help.DropDownItems.Add(MenuItem("help.setup"));
+        help.DropDownItems.Add(new ToolStripSeparator());
         help.DropDownItems.Add(MenuItem("help.about"));
 
         _menu.Items.Add(file);
@@ -422,14 +428,20 @@ public sealed class MainForm : Form
         var configReports = new List<string>();
         if (TagNames.LoadFile(Path.Combine(AppContext.BaseDirectory, TagNames.FileName)) is string tagNamesReport)
             configReports.Add(tagNamesReport);
+        if (FieldHelp.LoadFile(Path.Combine(AppContext.BaseDirectory, FieldHelp.FileName)) is string tagHelpReport)
+            configReports.Add(tagHelpReport);
         foreach (var b in new[] { "BIB", "AUT" })
             if (ValidationProfileConfig.LoadFile(
                     Path.Combine(AppContext.BaseDirectory, ValidationProfileConfig.FileName(b)), b) is string profileReport)
                 configReports.Add(profileReport);
         configReports.AddRange(_keymap.Diagnostics);
-        Load += (_, _) => SetMessage(configReports.Count > 0
-            ? string.Join("  |  ", configReports)
-            : "No catalogue open — File → New Catalogue or Open Catalogue.");
+        Load += (_, _) =>
+        {
+            SetMessage(configReports.Count > 0
+                ? string.Join("  |  ", configReports)
+                : "No catalogue open — File → New Catalogue or Open Catalogue.");
+            MaybeShowFirstRun();
+        };
         FormClosed += (_, _) => _db?.Dispose();
     }
 
@@ -443,6 +455,54 @@ public sealed class MainForm : Form
         if (_keymap.BindingFor(commandId) is string chord)
             item.ShortcutKeyDisplayString = chord;
         return item;
+    }
+
+    /// <summary>F1: show the offline MARC21 help for the field at the caret in the
+    /// reusable, non-modal help panel. Works from the editor (help for the current
+    /// field or the leader); elsewhere it says so rather than doing nothing.</summary>
+    private void ShowFieldHelp()
+    {
+        string? tag = null;
+        if (_recordView.Visible && _currentDoc is not null && CurrentRef() is { } at)
+            tag = at.FieldIndex < 0 ? "LDR" : _currentDoc.Record.Fields[at.FieldIndex].Tag;
+
+        if (tag is null)
+        {
+            SetMessage("Field Help (F1): open a record and stand on a field to see its MARC21 help.");
+            return;
+        }
+
+        if (_fieldHelp is null || _fieldHelp.IsDisposed)
+        {
+            _fieldHelp = new FieldHelpForm();
+            _fieldHelp.Location = new Point(
+                Math.Max(0, Bounds.Right - _fieldHelp.Width - 40),
+                Math.Max(0, Bounds.Top + 120));
+        }
+        _fieldHelp.ShowHelp(tag);
+        if (!_fieldHelp.Visible) _fieldHelp.Show(this);
+        else _fieldHelp.BringToFront();
+        // Keep the caret in the editor — help is a glance, not a focus change.
+        _viewer.Focus();
+    }
+
+    /// <summary>Help → Setup: the orientation wizard. Reachable any time; also shown
+    /// once on a fresh install by <see cref="MaybeShowFirstRun"/>.</summary>
+    private void ShowSetupWizard()
+    {
+        using var wiz = new FirstRunForm(NewCatalog, OpenCatalogDialog, () => _repo is not null);
+        wiz.ShowDialog(this);
+    }
+
+    /// <summary>Auto-shows the Setup wizard exactly once on a clean install, then
+    /// records that so it never appears on its own again (Help → Setup still opens
+    /// it). This is one-time onboarding, not remembered session state.</summary>
+    private void MaybeShowFirstRun()
+    {
+        if (_appState.FirstRunDone) return;
+        _appState.FirstRunDone = true;
+        _appState.Save();
+        ShowSetupWizard();
     }
 
     private void ShowAbout()

@@ -20,6 +20,13 @@ public sealed class AppState
     /// <summary>The last folder a File dialog used, or null when unknown.</summary>
     public string? LastFolder { get; set; }
 
+    /// <summary>True once the first-run Setup wizard has been shown, so it stops
+    /// appearing on its own at launch (Module 10). This is one-time onboarding state,
+    /// not session memory — it never reconnects a catalogue or restores anything, and
+    /// the wizard stays reachable any time via Help → Setup. A missing/corrupt file
+    /// reads false, so a fresh install shows the wizard exactly once.</summary>
+    public bool FirstRunDone { get; set; }
+
     public static AppState Load() => LoadFrom(DefaultPath);
     public void Save() => SaveTo(DefaultPath);
 
