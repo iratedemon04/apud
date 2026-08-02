@@ -155,12 +155,73 @@ public class FtsSearchTests : IDisposable
     }
 
     [Fact]
+    public void Bib_series_publisher_and_isbn_are_their_own_scopes()
+    {
+        var rec = InsertPushed(
+            "=LDR  00000nam a2200000 i 4500\n=001  5\n" +
+            "=020  \\\\$a9788478884457\n" +
+            "=245  10$aAlgo interesante\n" +
+            "=264  \\1$aMadrid :$bAlianza Editorial,$c2020.\n" +
+            "=490  1\\$aBiblioteca de autores clasicos\n");
+
+        Assert.Contains(rec.Id, Repo.Search("BIB", "9788478884457", SearchScope.Isbn));
+        Assert.Contains(rec.Id, Repo.Search("BIB", "alianza", SearchScope.Publisher));
+        Assert.Empty(Repo.Search("BIB", "madrid", SearchScope.Publisher));   // $a place, not $b
+        Assert.Contains(rec.Id, Repo.Search("BIB", "biblioteca clasicos", SearchScope.Series));
+        Assert.Empty(Repo.Search("BIB", "alianza", SearchScope.Title));
+    }
+
+    [Fact]
+    public void Aut_heading_types_are_separate_scopes()
+    {
+        var person = InsertPushed("=LDR  00000nz  a2200000n  4500\n=001  1\n=100  1\\$aTwain, Mark\n", "AUT");
+        var uniform = InsertPushed("=LDR  00000nz  a2200000n  4500\n=001  2\n=130  \\0$aBible.$pNew Testament\n", "AUT");
+        var topical = InsertPushed("=LDR  00000nz  a2200000n  4500\n=001  3\n=150  \\\\$aPhysics\n", "AUT");
+        var corp = InsertPushed("=LDR  00000nz  a2200000n  4500\n=001  4\n=110  2\\$aUnited Nations\n", "AUT");
+
+        Assert.Contains(person.Id, Repo.Search("AUT", "twain", SearchScope.HeadingPersonal));
+        Assert.Empty(Repo.Search("AUT", "twain", SearchScope.HeadingUniform));   // a 130 lookup is not a 100 lookup
+
+        Assert.Contains(uniform.Id, Repo.Search("AUT", "bible", SearchScope.HeadingUniform));
+        Assert.Empty(Repo.Search("AUT", "bible", SearchScope.HeadingPersonal));
+
+        Assert.Contains(topical.Id, Repo.Search("AUT", "physics", SearchScope.HeadingTopical));
+        Assert.Contains(corp.Id, Repo.Search("AUT", "nations", SearchScope.HeadingCorporate));
+
+        Assert.Contains(person.Id, Repo.Search("AUT", "twain", SearchScope.All)); // All fields still spans them
+    }
+
+    [Fact]
+    public void Aut_tracings_and_sources_are_scoped_and_5xx_is_not_notes()
+    {
+        var rec = InsertPushed(
+            "=LDR  00000nz  a2200000n  4500\n=001  10\n" +
+            "=100  1\\$aClemens, Samuel Langhorne\n" +
+            "=400  1\\$aTwain, Mark\n" +
+            "=500  1\\$aWarner, Charles Dudley\n" +
+            "=670  \\\\$aThe gilded age, 1873\n" +
+            "=680  \\\\$aAmerican author and humorist\n", "AUT");
+
+        Assert.Contains(rec.Id, Repo.Search("AUT", "twain", SearchScope.SeeFrom));    // 4XX
+        Assert.Contains(rec.Id, Repo.Search("AUT", "warner", SearchScope.SeeAlso));   // 5XX
+        Assert.Contains(rec.Id, Repo.Search("AUT", "gilded", SearchScope.Sources));   // 670
+
+        // In authority records 5XX is a See-Also tracing, NOT a note (unlike BIB):
+        Assert.Empty(Repo.Search("AUT", "warner", SearchScope.Notes));
+        Assert.Contains(rec.Id, Repo.Search("AUT", "humorist", SearchScope.All)); // 680 still in anytext
+    }
+
+    [Fact]
     public void Match_expression_wraps_scoped_terms_in_a_column_filter()
     {
         Assert.Equal("\"fisica\"* \"nuclear\"*", RecordRepository.BuildMatchExpression("fisica nuclear"));
         Assert.Equal("title : (\"fisica\"*)", RecordRepository.BuildMatchExpression("fisica", SearchScope.Title));
         Assert.Equal("notes : (\"index\"*)", RecordRepository.BuildMatchExpression("index", SearchScope.Notes));
         Assert.Equal("callnumber : (\"qc793\"*)", RecordRepository.BuildMatchExpression("qc793", SearchScope.CallNumber));
+        Assert.Equal("h_personal : (\"twain\"*)", RecordRepository.BuildMatchExpression("twain", SearchScope.HeadingPersonal));
+        Assert.Equal("variant : (\"twain\"*)", RecordRepository.BuildMatchExpression("twain", SearchScope.SeeFrom));
+        Assert.Equal("series : (\"clasicos\"*)", RecordRepository.BuildMatchExpression("clasicos", SearchScope.Series));
+        Assert.Equal("identifier : (\"978\"*)", RecordRepository.BuildMatchExpression("978", SearchScope.Isbn));
         Assert.Equal("", RecordRepository.BuildMatchExpression("   ", SearchScope.Title));
     }
 

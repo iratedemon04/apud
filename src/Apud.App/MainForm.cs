@@ -43,16 +43,41 @@ public sealed class MainForm : Form
     private readonly DataGridView _viewer;
     private readonly ListView _findings;          // Ctrl+W/Ctrl+L output, click to jump
 
-    private static readonly (string Label, SearchScope Scope)[] Scopes =
+    // The scope dropdown is base-aware: BIB and AUT index completely different
+    // fields, so each base shows its own list (Aleph presents different indexes per
+    // base). _scopes holds whichever list is currently displayed.
+    private static readonly (string Label, SearchScope Scope)[] BibScopes =
     {
         ("All fields", SearchScope.All),
         ("Title", SearchScope.Title),
         ("Author", SearchScope.Author),
         ("Subjects", SearchScope.Subjects),
+        ("Series", SearchScope.Series),
+        ("Publisher", SearchScope.Publisher),
         ("Notes", SearchScope.Notes),
         ("Call No.", SearchScope.CallNumber),
+        ("ISBN/ISSN", SearchScope.Isbn),
         ("Control No.", SearchScope.ControlNumber),
     };
+
+    private static readonly (string Label, SearchScope Scope)[] AutScopes =
+    {
+        ("All fields", SearchScope.All),
+        ("Personal name", SearchScope.HeadingPersonal),
+        ("Corporate name", SearchScope.HeadingCorporate),
+        ("Meeting name", SearchScope.HeadingMeeting),
+        ("Uniform title", SearchScope.HeadingUniform),
+        ("Topical term", SearchScope.HeadingTopical),
+        ("Geographic name", SearchScope.HeadingGeographic),
+        ("Genre/form", SearchScope.HeadingGenre),
+        ("See-from / Variants", SearchScope.SeeFrom),
+        ("See-also / Related", SearchScope.SeeAlso),
+        ("Sources", SearchScope.Sources),
+        ("Control No.", SearchScope.ControlNumber),
+    };
+
+    private (string Label, SearchScope Scope)[] _scopes = BibScopes;
+    private string _scopesBase = "";
 
     /// <summary>How the result set is ordered. Relevance keeps the FTS rank order
     /// (a keyword search's best-match-first); the rest are deterministic sorts the
@@ -260,9 +285,8 @@ public sealed class MainForm : Form
         _searchBase.SelectedIndex = 0;
         _searchBase.SelectedIndexChanged += (_, _) => SetBase(CurrentBase);
 
-        _searchScope = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 100 };
-        foreach (var (label, _) in Scopes) _searchScope.Items.Add(label);
-        _searchScope.SelectedIndex = 0;
+        _searchScope = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150 };
+        PopulateScopes(CurrentBase);
 
         _sortBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 130 };
         foreach (var (label, _) in Sorts) _sortBox.Items.Add(label);
@@ -803,6 +827,20 @@ public sealed class MainForm : Form
         _autItem.Checked = @base == "AUT";
         _searchBase.SelectedIndex = @base == "AUT" ? 1 : 0;
         _syncingBase = false;
+        PopulateScopes(@base);
+    }
+
+    /// <summary>Fills the scope dropdown with the current base's indexes (BIB and
+    /// AUT are entirely different). No-op when the base's list is already shown, so
+    /// switching to the same base doesn't wipe the user's chosen scope.</summary>
+    private void PopulateScopes(string @base)
+    {
+        if (@base == _scopesBase && _searchScope.Items.Count > 0) return;
+        _scopesBase = @base;
+        _scopes = @base == "AUT" ? AutScopes : BibScopes;
+        _searchScope.Items.Clear();
+        foreach (var (label, _) in _scopes) _searchScope.Items.Add(label);
+        _searchScope.SelectedIndex = 0;
     }
 
     // ---------- search ----------
@@ -813,7 +851,7 @@ public sealed class MainForm : Form
         string query = _searchBox.Text.Trim();
         if (query.Length == 0) return;
 
-        var scope = Scopes[_searchScope.SelectedIndex].Scope;
+        var scope = _scopes[_searchScope.SelectedIndex].Scope;
         var ids = _repo.Search(CurrentBase, query, scope);
 
         _history.Add(new SearchHistoryEntry(query, scope, CurrentBase, ids.Count));
@@ -888,6 +926,18 @@ public sealed class MainForm : Form
         _resultsList.Focus();
     }
 
+    /// <summary>The display label for a scope, from whichever base's list defines it
+    /// (search history can hold entries from either base).</summary>
+    private static string ScopeLabel(SearchScope scope)
+    {
+        foreach (var list in new[] { BibScopes, AutScopes })
+        {
+            int i = Array.FindIndex(list, s => s.Scope == scope);
+            if (i >= 0) return list[i].Label;
+        }
+        return scope.ToString();
+    }
+
     private void RefreshHistoryList()
     {
         _historyList.BeginUpdate();
@@ -896,7 +946,7 @@ public sealed class MainForm : Form
         {
             var item = new ListViewItem(e.Query);
             item.SubItems.Add(e.Base);
-            item.SubItems.Add(Scopes.First(s => s.Scope == e.Scope).Label);
+            item.SubItems.Add(ScopeLabel(e.Scope));
             item.SubItems.Add(e.Hits.ToString());
             item.Tag = e;
             _historyList.Items.Add(item);
@@ -908,9 +958,10 @@ public sealed class MainForm : Form
     {
         if (_historyList.SelectedItems.Count == 0) return;
         var e = (SearchHistoryEntry)_historyList.SelectedItems[0].Tag!;
-        SetBase(e.Base);
+        SetBase(e.Base);   // repopulates the scope list for that base
         _searchBox.Text = e.Query;
-        _searchScope.SelectedIndex = Array.FindIndex(Scopes, s => s.Scope == e.Scope);
+        int idx = Array.FindIndex(_scopes, s => s.Scope == e.Scope);
+        _searchScope.SelectedIndex = idx >= 0 ? idx : 0;
         RunSearch();
     }
 
