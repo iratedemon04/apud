@@ -83,6 +83,7 @@ public sealed class MainForm : Form
         _commands.Add(new Command { Id = "catalogue.import-folder", Name = "Import Fol&der...", Execute = ImportFolder });
         _commands.Add(new Command { Id = "catalogue.marc-out", Name = "Set &BIB Output Folder...", Execute = () => SetMarcOutFolder("BIB") });
         _commands.Add(new Command { Id = "catalogue.marc-out-aut", Name = "Set &Authority Output Folder...", Execute = () => SetMarcOutFolder("AUT") });
+        _commands.Add(new Command { Id = "catalogue.org-code", Name = "Set &Organization Code...", Execute = SetOrgCode });
         _commands.Add(new Command { Id = "catalogue.export-base", Name = "Export &Base...", Execute = ExportBase });
         _commands.Add(new Command { Id = "catalogue.export-selected", Name = "Export &Selected...", Execute = ExportSelected });
         _commands.Add(new Command { Id = "app.exit", Name = "E&xit", DefaultKey = "Alt+F4", Execute = Close });
@@ -128,6 +129,7 @@ public sealed class MainForm : Form
         file.DropDownItems.Add(MenuItem("catalogue.import-folder"));
         file.DropDownItems.Add(MenuItem("catalogue.marc-out"));
         file.DropDownItems.Add(MenuItem("catalogue.marc-out-aut"));
+        file.DropDownItems.Add(MenuItem("catalogue.org-code"));
         file.DropDownItems.Add(MenuItem("catalogue.export-base"));
         file.DropDownItems.Add(MenuItem("catalogue.export-selected"));
         file.DropDownItems.Add(new ToolStripSeparator());
@@ -1635,6 +1637,70 @@ public sealed class MainForm : Form
     /// writes each pushed record's .mrk into for that base. Stored in the
     /// catalogue's settings (remembered per catalogue). Cancelling leaves the
     /// current choice; picking the same place is idempotent.</summary>
+    /// <summary>File → Set Organization Code: the MARC org code Apud stamps into 003
+    /// on push (per-catalogue, stored in the setting table). A per-catalogue constant,
+    /// not per-record content — the one org-level value Apud fills for you. Blank turns
+    /// 003 auto-fill back off. This is a single focused command, not a Settings dialog
+    /// (that was cut Module 10); it mirrors the Set … Output Folder commands.</summary>
+    private void SetOrgCode()
+    {
+        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+
+        string current = _repo.GetSetting("org_code") ?? "";
+        if (PromptForText(
+                "Set Organization Code",
+                "MARC organization code (e.g. MX-MxBAC). Apud stamps it into 003 on\n" +
+                "push. Leave blank to turn 003 auto-fill off.",
+                current) is not string entered)
+            return; // cancelled — nothing changes
+
+        string code = entered.Trim();
+        _repo.SetSetting("org_code", code);
+        SetMessage(code.Length > 0
+            ? $"Organization code set — 003 will be filled with \"{code}\" on push."
+            : "Organization code cleared — 003 will no longer be auto-filled.");
+    }
+
+    /// <summary>A minimal one-line text prompt (WinForms ships no InputBox). Returns the
+    /// entered text on OK, or null on Cancel. Built inline, Aleph-plain.</summary>
+    private string? PromptForText(string title, string prompt, string initial)
+    {
+        using var dialog = new Form
+        {
+            Text = title,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            StartPosition = FormStartPosition.CenterParent,
+            MinimizeBox = false,
+            MaximizeBox = false,
+            ClientSize = new Size(420, 130),
+        };
+        var label = new Label
+        {
+            Text = prompt,
+            Location = new Point(14, 12),
+            Size = new Size(392, 44),
+            Font = new Font("Segoe UI", 9.75f),
+        };
+        var box = new TextBox
+        {
+            Text = initial,
+            Location = new Point(14, 62),
+            Size = new Size(392, 24),
+            Font = new Font("Segoe UI", 9.75f),
+        };
+        var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Size = new Size(84, 28), Location = new Point(228, 94) };
+        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Size = new Size(84, 28), Location = new Point(320, 94) };
+        dialog.Controls.Add(label);
+        dialog.Controls.Add(box);
+        dialog.Controls.Add(ok);
+        dialog.Controls.Add(cancel);
+        dialog.AcceptButton = ok;
+        dialog.CancelButton = cancel;
+        box.SelectAll();
+
+        return dialog.ShowDialog(this) == DialogResult.OK ? box.Text : null;
+    }
+
     private void SetMarcOutFolder(string @base)
     {
         if (_repo is null) { SetMessage("Open a catalogue first."); return; }

@@ -40,7 +40,8 @@ public sealed class PushService
 
     /// <summary>
     /// Ctrl+L: validate, then — only if nothing errored — derive the mechanical
-    /// data (001/005, stable field order, leader length/base address), promote
+    /// data (001/005, the 003 org code when set, stable field order, leader
+    /// length/base address), promote
     /// the record to pushed, and write it. Pushing an authority record ripples its
     /// heading into every linked bib (§6.3.7). On any error nothing is written and
     /// <see cref="PushResult.Ok"/> is false.
@@ -128,11 +129,16 @@ public sealed class PushService
         // 005: transaction date-time, MARC form yyyymmddhhmmss.f.
         UpsertControl(record, "005", DateTime.Now.ToString("yyyyMMddHHmmss.f"));
 
-        // No 003 (or any other record content) is written: the cataloguing agency's
-        // org code is institution data that lives in the cataloguer's templates, not
-        // something Apud invents (user, 2026-08-01). Apud only ever derives the purely
-        // mechanical control data — 001, 005, field order, leader lengths — and the
-        // authority linkage; everything else on a record is typed or templated by hand.
+        // 003: the cataloguing agency's MARC organization code. This IS wanted as an
+        // auto-fill (user, 2026-08-01) — it is a per-catalogue constant, not per-record
+        // content, so unlike language/classification (which stay in templates) Apud may
+        // stamp it. It writes ONLY when an org code has been set (File → Set Organization
+        // Code); when unset, nothing is written — Apud still invents nothing on its own.
+        // Every other byte of the record remains the cataloguer's.
+        string? org = _repo.GetSetting("org_code");
+        if (!string.IsNullOrWhiteSpace(org))
+            UpsertControl(record, "003", org.Trim());
+
         StableSortByTag(record);
         LeaderMechanics.Recompute(record);
     }

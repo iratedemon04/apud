@@ -66,6 +66,30 @@ public class PushServiceTests : IDisposable
     }
 
     [Fact]
+    public void Push_fills_003_from_the_org_code_when_set()
+    {
+        Repo.SetSetting("org_code", "MX-MxBAC");
+        var rec = new StoredRecord("BIB", CleanBib());
+        Push(rec);
+
+        var record = Repo.Load(rec.Id)!.Record;
+        Assert.Equal("MX-MxBAC", record.FieldsWithTag("003").Single().ControlData);
+    }
+
+    [Fact]
+    public void Push_writes_no_003_when_the_org_code_is_unset_or_blank()
+    {
+        var recNone = new StoredRecord("BIB", CleanBib());
+        Push(recNone);
+        Assert.Empty(Repo.Load(recNone.Id)!.Record.FieldsWithTag("003"));
+
+        Repo.SetSetting("org_code", "   ");                 // blank counts as unset
+        var recBlank = new StoredRecord("BIB", CleanBib());
+        Push(recBlank);
+        Assert.Empty(Repo.Load(recBlank.Id)!.Record.FieldsWithTag("003"));
+    }
+
+    [Fact]
     public void Push_orders_fields_by_tag_and_keeps_repeated_tag_order()
     {
         // Written out of order, with two subjects whose order is real information.
