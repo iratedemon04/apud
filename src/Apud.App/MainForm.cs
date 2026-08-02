@@ -1885,13 +1885,17 @@ public sealed class MainForm : Form
 
     /// <summary>Builds a SyncService whose transport connects with the session
     /// passphrase. A fresh transport per operation (the factory runs each call).</summary>
-    private static SyncService SyncServiceFor(SyncSettings settings, string? passphrase) =>
+    private SyncService SyncServiceFor(SyncSettings settings, string? passphrase) =>
         new(() =>
         {
             var transport = new SshNetSftpTransport(settings, passphrase);
             transport.Connect();
             return transport;
-        });
+        }, CatalogueName());
+
+    /// <summary>The open catalogue's file name (no extension) — the identity a backup keeps.</summary>
+    private string CatalogueName() =>
+        _catalogPath is null ? "catalog" : Path.GetFileNameWithoutExtension(_catalogPath);
 
     /// <summary>Asks for the key passphrase (masked, blank allowed). Null = cancelled.</summary>
     private string? AskPassphrase(SyncSettings settings) =>
@@ -2003,7 +2007,7 @@ public sealed class MainForm : Form
         finally { Cursor.Current = Cursors.Default; }
 
         if (MessageBox.Show(this,
-                $"Downloaded {chosen}.\n\nOpen it now as a separate catalogue? Your current catalogue is left untouched.",
+                $"Downloaded to {Path.GetFileName(save.FileName)}.\n\nOpen it now as a separate catalogue?",
                 "Restore", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
             OpenCatalog(save.FileName);
         else

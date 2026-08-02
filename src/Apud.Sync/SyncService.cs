@@ -14,26 +14,32 @@ public sealed record SnapshotInfo(string Name, DateTime TimestampUtc);
 /// final file. Knows nothing about SSH: it is handed a factory that returns a connected,
 /// host-key-verified transport, which is what lets the whole flow be tested with a fake.
 ///
-/// Server layout under the configured root:
-///   snapshots/catalog-YYYYMMDD-HHMMSS.db   (dated history, pruned to keep-N)
-///   latest/catalog.db                      (stable path for server-side scripts)
-///   latest/BIB.mrk, latest/AUT.mrk         (optional plain-text publication)
+/// Server layout under the configured root (&lt;catalogue&gt; = the catalogue's own file name):
+///   snapshots/&lt;catalogue&gt;-YYYYMMDD-HHMMSS.db   (dated history, pruned to keep-N)
+///   latest/&lt;catalogue&gt;.db                      (stable path for server-side scripts)
+///   latest/BIB.mrk, latest/AUT.mrk             (optional plain-text publication)
 /// </summary>
 public sealed class SyncService
 {
     private readonly Func<ISftpTransport> _connect;
+    private readonly string _catalogueName;
 
     /// <param name="connectedTransportFactory">Returns a freshly connected, host-key-verified
     /// transport each call; SyncService disposes it.</param>
-    public SyncService(Func<ISftpTransport> connectedTransportFactory) =>
+    /// <param name="catalogueName">The open catalogue's file name (no extension) — drives the
+    /// snapshot / latest names so a backup keeps the catalogue's identity.</param>
+    public SyncService(Func<ISftpTransport> connectedTransportFactory, string catalogueName)
+    {
         _connect = connectedTransportFactory;
+        _catalogueName = SnapshotNaming.SafeBase(catalogueName);
+    }
 
     public UploadResult Upload(ISnapshotSource source, SyncSettings settings, DateTime utcNow)
     {
         string root = settings.RemoteRoot.Trim().Trim('/');
         string snapshotsDir = Join(root, "snapshots");
         string latestDir = Join(root, "latest");
-        string name = SnapshotNaming.ForTimestamp(utcNow);
+        string name = SnapshotNaming.ForTimestamp(_catalogueName, utcNow);
 
         string work = Path.Combine(Path.GetTempPath(), "apud-sync-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(work);
@@ -50,7 +56,7 @@ public sealed class SyncService
 
             string remoteSnapshot = Join(snapshotsDir, name);
             UploadAtomic(t, localDb, remoteSnapshot);
-            UploadAtomic(t, localDb, Join(latestDir, "catalog.db"));
+            UploadAtomic(t, localDb, Join(latestDir, _catalogueName + ".db"));
 
             var uploadedExports = new List<string>();
             foreach (var (exportName, content) in exports)
@@ -61,7 +67,7 @@ public sealed class SyncService
                 uploadedExports.Add(exportName);
             }
 
-            var prune = SnapshotNaming.ToPrune(t.List(snapshotsDir), settings.Retention);
+            var prune = SnapshotNaming.ToPrune(_catalogueName, t.List(snapshotsDir), settings.Retention);
             foreach (string old in prune) t.Delete(Join(snapshotsDir, old));
 
             return new UploadResult(remoteSnapshot, uploadedExports, prune.Count, t.SeenFingerprint);
@@ -78,8 +84,8 @@ public sealed class SyncService
         string snapshotsDir = Join(settings.RemoteRoot.Trim().Trim('/'), "snapshots");
         using var t = _connect();
         return t.List(snapshotsDir)
-            .Where(SnapshotNaming.IsSnapshot)
-            .Select(n => new SnapshotInfo(n, SnapshotNaming.TimestampOf(n)))
+            .Where(n => SnapshotNaming.IsSnapshot(_catalogueName, n))
+            .Select(n => new SnapshotInfo(n, SnapshotNaming.TimestampOf(_catalogueName, n)))
             .OrderByDescending(s => s.Name, StringComparer.Ordinal)
             .ToList();
     }

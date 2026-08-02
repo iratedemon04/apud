@@ -24,20 +24,35 @@ public class SyncTests : IDisposable
     public void Snapshot_name_encodes_the_timestamp_and_round_trips()
     {
         var utc = new DateTime(2026, 8, 1, 9, 7, 3, DateTimeKind.Utc);
-        string name = SnapshotNaming.ForTimestamp(utc);
+        string name = SnapshotNaming.ForTimestamp("catalog", utc);
 
         Assert.Equal("catalog-20260801-090703.db", name);
-        Assert.True(SnapshotNaming.IsSnapshot(name));
-        Assert.Equal(utc, SnapshotNaming.TimestampOf(name));
+        Assert.True(SnapshotNaming.IsSnapshot("catalog", name));
+        Assert.Equal(utc, SnapshotNaming.TimestampOf("catalog", name));
+    }
+
+    [Fact]
+    public void Snapshot_name_keeps_the_catalogue_identity()
+    {
+        var utc = new DateTime(2026, 8, 2, 21, 0, 34, DateTimeKind.Utc);
+        Assert.Equal("CATALOGO-20260802-210034.db", SnapshotNaming.ForTimestamp("CATALOGO", utc));
+
+        // A different catalogue in the same folder must not match — so it never prunes it.
+        Assert.True(SnapshotNaming.IsSnapshot("CATALOGO", "CATALOGO-20260802-210034.db"));
+        Assert.False(SnapshotNaming.IsSnapshot("catalog", "CATALOGO-20260802-210034.db"));
+        Assert.False(SnapshotNaming.IsSnapshot("CATALOGO", "catalog-20260802-210034.db"));
+
+        // A blank name never yields a malformed snapshot; it falls back to "catalog".
+        Assert.Equal("catalog-20260802-210034.db", SnapshotNaming.ForTimestamp("", utc));
     }
 
     [Fact]
     public void Non_snapshot_names_are_rejected()
     {
-        Assert.False(SnapshotNaming.IsSnapshot("catalog.db"));
-        Assert.False(SnapshotNaming.IsSnapshot("catalog-20260801-090703.db.tmp"));
-        Assert.False(SnapshotNaming.IsSnapshot("BIB.mrk"));
-        Assert.Equal(DateTime.MinValue, SnapshotNaming.TimestampOf("nope"));
+        Assert.False(SnapshotNaming.IsSnapshot("catalog", "catalog.db"));
+        Assert.False(SnapshotNaming.IsSnapshot("catalog", "catalog-20260801-090703.db.tmp"));
+        Assert.False(SnapshotNaming.IsSnapshot("catalog", "BIB.mrk"));
+        Assert.Equal(DateTime.MinValue, SnapshotNaming.TimestampOf("catalog", "nope"));
     }
 
     [Fact]
@@ -53,7 +68,7 @@ public class SyncTests : IDisposable
             "BIB.mrk",
         };
 
-        var prune = SnapshotNaming.ToPrune(names, keep: 2);
+        var prune = SnapshotNaming.ToPrune("catalog", names, keep: 2);
 
         // Newest two (…0003, …0002) kept; the oldest (…0001) pruned; junk untouched.
         Assert.Equal(new[] { "catalog-20260801-000001.db" }, prune);
@@ -63,9 +78,9 @@ public class SyncTests : IDisposable
     public void ToPrune_of_zero_or_fewer_keeps_everything()
     {
         var names = new[] { "catalog-20260801-000001.db", "catalog-20260801-000002.db" };
-        Assert.Empty(SnapshotNaming.ToPrune(names, keep: 0));
-        Assert.Empty(SnapshotNaming.ToPrune(names, keep: -5));
-        Assert.Empty(SnapshotNaming.ToPrune(names, keep: 2));  // exactly N → nothing to drop
+        Assert.Empty(SnapshotNaming.ToPrune("catalog", names, keep: 0));
+        Assert.Empty(SnapshotNaming.ToPrune("catalog", names, keep: -5));
+        Assert.Empty(SnapshotNaming.ToPrune("catalog", names, keep: 2));  // exactly N → nothing to drop
     }
 
     // ---------- SyncSettings round-trip ----------
@@ -158,7 +173,7 @@ public class SyncTests : IDisposable
         server.Files["apud/snapshots/catalog-20260101-000002.db"] = new byte[] { 2 };
         server.Files["apud/snapshots/catalog-20260101-000003.db"] = new byte[] { 3 };
 
-        var service = new SyncService(() => server);
+        var service = new SyncService(() => server, "catalog");
         var settings = new SyncSettings { Host = "h", User = "u", KeyPath = "k", RemoteRoot = "apud", Retention = 2 };
         var source = new FakeSnapshotSource(dbBytes: new byte[] { 9, 9 },
             exports: new[] { ("BIB.mrk", new byte[] { 1 }), ("AUT.mrk", new byte[] { 2 }) });
@@ -189,7 +204,7 @@ public class SyncTests : IDisposable
     public void Upload_is_atomic_every_final_file_arrives_via_tmp_then_rename()
     {
         var server = new FakeSftpTransport();
-        var service = new SyncService(() => server);
+        var service = new SyncService(() => server, "catalog");
         var settings = new SyncSettings { Host = "h", User = "u", KeyPath = "k", RemoteRoot = "apud", Retention = 5 };
 
         service.Upload(new FakeSnapshotSource(new byte[] { 7 }, Array.Empty<(string, byte[])>()),
@@ -211,7 +226,7 @@ public class SyncTests : IDisposable
         server.Files["apud/snapshots/catalog-20260801-000001.db"] = new byte[] { 1 };
         server.Files["apud/snapshots/notes.txt"] = new byte[] { 0 };
 
-        var service = new SyncService(() => server);
+        var service = new SyncService(() => server, "catalog");
         var settings = new SyncSettings { RemoteRoot = "apud" };
 
         var list = service.ListSnapshots(settings);
@@ -227,7 +242,7 @@ public class SyncTests : IDisposable
         var server = new FakeSftpTransport();
         server.Files["apud/snapshots/catalog-20260801-000001.db"] = new byte[] { 4, 2 };
 
-        var service = new SyncService(() => server);
+        var service = new SyncService(() => server, "catalog");
         string local = Path.Combine(_dir, "restored.db");
         service.Download(new SyncSettings { RemoteRoot = "apud" }, "catalog-20260801-000001.db", local);
 
@@ -238,7 +253,7 @@ public class SyncTests : IDisposable
     public void Upload_reports_the_fingerprint_the_transport_saw()
     {
         var server = new FakeSftpTransport { SeenFingerprint = "SHA256:seen" };
-        var service = new SyncService(() => server);
+        var service = new SyncService(() => server, "catalog");
         var result = service.Upload(new FakeSnapshotSource(new byte[] { 1 }, Array.Empty<(string, byte[])>()),
             new SyncSettings { RemoteRoot = "apud", Retention = 5 },
             new DateTime(2026, 8, 1, 0, 0, 0, DateTimeKind.Utc));
