@@ -142,6 +142,7 @@ public sealed class MainForm : Form
         _commands.Add(new Command { Id = "search.focus", Name = "&Search", DefaultKey = "F2", Execute = ShowSearchView });
         _commands.Add(new Command { Id = "help.field", Name = "&Field Help", DefaultKey = "F1", Execute = ShowFieldHelp });
         _commands.Add(new Command { Id = "help.intro", Name = "&Getting Started", Execute = ShowIntro });
+        _commands.Add(new Command { Id = "help.backup-time", Name = "Bac&kup Time", Execute = ShowBackupTime });
         _commands.Add(new Command { Id = "help.about", Name = "&About Apud", Execute = ShowAbout });
         // Editor commands (Module 6 steps 3-7). §6.2: record commands own the keyboard.
         _commands.Add(new Command { Id = "record.new", Name = "&New Record / Copy", DefaultKey = "Ctrl+N", Execute = NewRecord });
@@ -226,6 +227,7 @@ public sealed class MainForm : Form
         var help = new ToolStripMenuItem("&Help");
         help.DropDownItems.Add(MenuItem("help.field"));
         help.DropDownItems.Add(MenuItem("help.intro"));
+        help.DropDownItems.Add(MenuItem("help.backup-time"));
         help.DropDownItems.Add(new ToolStripSeparator());
         help.DropDownItems.Add(MenuItem("help.about"));
 
@@ -586,6 +588,28 @@ public sealed class MainForm : Form
         _appState.Save();
         ShowIntro();
     }
+
+    /// <summary>Help → Backup Time: the first-backup notice + estimate table, viewable
+    /// any time. Also shown once before a catalogue's first backup by the gate in
+    /// <see cref="UploadToServer"/>.</summary>
+    private void ShowBackupTime()
+    {
+        using var form = new BackupTimeForm(preBackup: false);
+        form.ShowDialog(this);
+    }
+
+    /// <summary>Before a catalogue's very first backup, show the time warning once (any
+    /// size). Returns false if the user cancelled at the warning. The "seen" flag is a
+    /// per-catalogue setting, set only after the first backup actually succeeds — so a
+    /// cancelled or failed first attempt still warns next time.</summary>
+    private bool ConfirmFirstBackup()
+    {
+        if (_repo?.GetSetting(FirstBackupSeenKey) == "1") return true;
+        using var form = new BackupTimeForm(preBackup: true);
+        return form.ShowDialog(this) == DialogResult.OK;
+    }
+
+    private const string FirstBackupSeenKey = "sync.first_backup_seen";
 
     private void ShowAbout()
     {
@@ -1916,6 +1940,7 @@ public sealed class MainForm : Form
             return;
         }
 
+        if (!ConfirmFirstBackup()) return; // first backup: warn about time, once, before anything
         if (AskPassphrase(settings) is not string passphrase) return; // cancelled
 
         SetMessage($"Backing up to {settings.Host}…");
@@ -1935,6 +1960,7 @@ public sealed class MainForm : Form
             }
 
             _pushesSinceSync = 0;
+            _repo.SetSetting(FirstBackupSeenKey, "1"); // first backup done → no more time warning
             string records = result.RecordFiles > 0 ? $" + {result.RecordFiles} record file(s)" : "";
             string pruned = result.Pruned > 0 ? $" Pruned {result.Pruned} old snapshot(s)." : "";
             SetMessage($"Backed up {Path.GetFileName(result.RemoteSnapshot)}{records} → {settings.RemoteRoot}.{pruned}");

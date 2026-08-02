@@ -128,36 +128,93 @@ public sealed class SyncService
         return new RecordDownloadResult(total, localRoot);
     }
 
+    /// <summary>The per-folder index of <c>filename → content-hash</c>; lets a backup skip
+    /// records whose <c>.mrk</c> is unchanged since last time (only the first backup, or an
+    /// edited record, actually uploads).</summary>
+    private const string ManifestName = ".manifest";
+
     /// <summary>Publishes each base's per-record files into <c>latest/&lt;folder&gt;/</c>,
-    /// then deletes any server <c>.mrk</c> there that no longer has a record (so a
-    /// deleted record's file does not linger). Returns the number of files uploaded.</summary>
+    /// incrementally: only files that are new or whose content changed are uploaded, files
+    /// whose record is gone are deleted, and a manifest records the current hashes for next
+    /// time. Record files upload directly (no tmp→rename): they are a mirror, so a re-run
+    /// heals a partial one, and skipping the rename halves the per-file cost. Returns the
+    /// number of files actually uploaded.</summary>
     private static int PublishRecordFolders(
         ISftpTransport t, string work, string latestDir, IReadOnlyList<RecordFolder> folders)
     {
-        int total = 0;
+        int uploaded = 0;
         foreach (var (_, folderName) in DbSnapshotSource.Folders)
         {
             var desired = folders.FirstOrDefault(f => f.Name == folderName)?.Files
                           ?? (IReadOnlyList<RecordFile>)Array.Empty<RecordFile>();
             string dir = Join(latestDir, folderName);
-            var existing = t.List(dir);
+            var existing = new HashSet<string>(t.List(dir), StringComparer.Ordinal);
+            if (desired.Count == 0 && existing.Count == 0) continue;
+
+            var old = existing.Contains(ManifestName)
+                ? ReadManifest(t, work, Join(dir, ManifestName))
+                : new Dictionary<string, string>(StringComparer.Ordinal);
 
             if (desired.Count > 0) t.EnsureDirectory(dir);
+
+            var current = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var file in desired)
             {
+                string hash = Hash(file.Content);
+                current[file.Name] = hash;
+                bool unchanged = old.TryGetValue(file.Name, out var prev)
+                                 && prev == hash && existing.Contains(file.Name);
+                if (unchanged) continue;
                 string local = Path.Combine(work, folderName + "-" + file.Name);
                 File.WriteAllBytes(local, file.Content);
-                UploadAtomic(t, local, Join(dir, file.Name));
-                total++;
+                t.Upload(local, Join(dir, file.Name)); // direct overwrite; a mirror needs no tmp→rename
+                uploaded++;
             }
 
-            var keep = new HashSet<string>(desired.Select(f => f.Name), StringComparer.Ordinal);
+            // A record deleted since last backup: remove its stale server file.
             foreach (string name in existing)
-                if (name.EndsWith(".mrk", StringComparison.OrdinalIgnoreCase) && !keep.Contains(name))
+                if (name.EndsWith(".mrk", StringComparison.OrdinalIgnoreCase) && !current.ContainsKey(name))
                     t.Delete(Join(dir, name));
+
+            // Rewrite the manifest (atomic — the next backup trusts it), or drop it when empty.
+            string manifestPath = Join(dir, ManifestName);
+            if (current.Count > 0)
+            {
+                string localManifest = Path.Combine(work, folderName + ".manifest");
+                File.WriteAllText(localManifest, SerializeManifest(current));
+                UploadAtomic(t, localManifest, manifestPath);
+            }
+            else if (existing.Contains(ManifestName))
+            {
+                t.Delete(manifestPath);
+            }
         }
-        return total;
+        return uploaded;
     }
+
+    private static Dictionary<string, string> ReadManifest(ISftpTransport t, string work, string remotePath)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        string local = Path.Combine(work, "manifest-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            t.Download(remotePath, local);
+            foreach (string line in File.ReadAllLines(local))
+            {
+                int sp = line.IndexOf(' ');
+                if (sp > 0) map[line[(sp + 1)..]] = line[..sp]; // "<hash> <filename>"
+            }
+        }
+        catch { /* missing/unreadable manifest → treat as empty; a full re-upload heals it */ }
+        finally { try { File.Delete(local); } catch { /* best-effort */ } }
+        return map;
+    }
+
+    private static string SerializeManifest(IReadOnlyDictionary<string, string> m) =>
+        string.Join("\n", m.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => $"{kv.Value} {kv.Key}"));
+
+    private static string Hash(byte[] bytes) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));
 
     private static void UploadAtomic(ISftpTransport t, string local, string remoteFinal)
     {

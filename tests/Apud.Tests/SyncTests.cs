@@ -229,6 +229,35 @@ public class SyncTests : IDisposable
     }
 
     [Fact]
+    public void Upload_is_incremental_only_changed_records_are_resent()
+    {
+        var server = new FakeSftpTransport();
+        var settings = new SyncSettings { Host = "h", User = "u", KeyPath = "k", RemoteRoot = "apud", Retention = 5 };
+        var service = new SyncService(() => server, "catalog");
+
+        // First backup: two new records → both uploaded, a manifest is written.
+        var first = service.Upload(
+            new FakeSnapshotSource(new byte[] { 9 }, new[] { Folder("bib", ("1.mrk", 1), ("2.mrk", 2)) }),
+            settings, new DateTime(2026, 8, 1, 10, 0, 0, DateTimeKind.Utc));
+        Assert.Equal(2, first.RecordFiles);
+        Assert.True(server.Files.ContainsKey("apud/latest/bib/.manifest"));
+
+        // Second backup: 1 unchanged, 2 edited, 3 new → only 2 and 3 are sent.
+        var second = service.Upload(
+            new FakeSnapshotSource(new byte[] { 9 }, new[] { Folder("bib", ("1.mrk", 1), ("2.mrk", 22), ("3.mrk", 3)) }),
+            settings, new DateTime(2026, 8, 1, 11, 0, 0, DateTimeKind.Utc));
+        Assert.Equal(2, second.RecordFiles);
+        Assert.Equal(new byte[] { 22 }, server.Files["apud/latest/bib/2.mrk"]);
+        Assert.True(server.Files.ContainsKey("apud/latest/bib/3.mrk"));
+
+        // Third backup: nothing changed → zero record uploads.
+        var third = service.Upload(
+            new FakeSnapshotSource(new byte[] { 9 }, new[] { Folder("bib", ("1.mrk", 1), ("2.mrk", 22), ("3.mrk", 3)) }),
+            settings, new DateTime(2026, 8, 1, 12, 0, 0, DateTimeKind.Utc));
+        Assert.Equal(0, third.RecordFiles);
+    }
+
+    [Fact]
     public void DownloadRecordFolders_writes_bib_and_aut_files_locally()
     {
         var server = new FakeSftpTransport();
