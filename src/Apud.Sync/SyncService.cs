@@ -2,11 +2,14 @@ namespace Apud.Sync;
 
 public sealed record UploadResult(
     string RemoteSnapshot,
-    IReadOnlyList<string> Exports,
+    int RecordFiles,
     int Pruned,
     string? SeenFingerprint);
 
 public sealed record SnapshotInfo(string Name, DateTime TimestampUtc);
+
+/// <summary>How many per-record <c>.mrk</c> files a restore wrote, and where.</summary>
+public sealed record RecordDownloadResult(int Files, string LocalRoot);
 
 /// <summary>
 /// Backup / publish orchestration (docs/PLAN.md §9b) over an <see cref="ISftpTransport"/>.
@@ -48,7 +51,7 @@ public sealed class SyncService
             // Produce the consistent copy locally first; only then touch the network.
             string localDb = Path.Combine(work, name);
             source.WriteDatabaseCopy(localDb);
-            var exports = source.Exports();
+            var folders = source.RecordFolders();
 
             using var t = _connect();
             t.EnsureDirectory(snapshotsDir);
@@ -58,19 +61,17 @@ public sealed class SyncService
             UploadAtomic(t, localDb, remoteSnapshot);
             UploadAtomic(t, localDb, Join(latestDir, _catalogueName + ".db"));
 
-            var uploadedExports = new List<string>();
-            foreach (var (exportName, content) in exports)
-            {
-                string localExport = Path.Combine(work, exportName);
-                File.WriteAllBytes(localExport, content);
-                UploadAtomic(t, localExport, Join(latestDir, exportName));
-                uploadedExports.Add(exportName);
-            }
+            // Legacy one-file exports from before the per-record layout — clear them so the
+            // server never keeps a stale concatenated copy beside the new folders.
+            foreach (var (@base, _) in DbSnapshotSource.Folders)
+                t.Delete(Join(latestDir, @base + ".mrk"));
+
+            int recordFiles = PublishRecordFolders(t, work, latestDir, folders);
 
             var prune = SnapshotNaming.ToPrune(_catalogueName, t.List(snapshotsDir), settings.Retention);
             foreach (string old in prune) t.Delete(Join(snapshotsDir, old));
 
-            return new UploadResult(remoteSnapshot, uploadedExports, prune.Count, t.SeenFingerprint);
+            return new UploadResult(remoteSnapshot, recordFiles, prune.Count, t.SeenFingerprint);
         }
         finally
         {
@@ -97,6 +98,65 @@ public sealed class SyncService
         string remote = Join(Join(settings.RemoteRoot.Trim().Trim('/'), "snapshots"), snapshotName);
         using var t = _connect();
         t.Download(remote, localPath);
+    }
+
+    /// <summary>Downloads the published per-record <c>.mrk</c> folders (<c>latest/bib</c>,
+    /// <c>latest/aut</c>) into <paramref name="localRoot"/> as <c>bib/</c> and <c>aut/</c>
+    /// sub-folders — the physical-records counterpart of a snapshot download. Same logic
+    /// as a snapshot download, applied per file; existing files of the same name are
+    /// overwritten (the "replace" the caller opted into). Never touches the database.</summary>
+    public RecordDownloadResult DownloadRecordFolders(SyncSettings settings, string localRoot)
+    {
+        string latestDir = Join(settings.RemoteRoot.Trim().Trim('/'), "latest");
+        int total = 0;
+        using var t = _connect();
+        foreach (var (_, folderName) in DbSnapshotSource.Folders)
+        {
+            string remoteDir = Join(latestDir, folderName);
+            var files = t.List(remoteDir)
+                         .Where(n => n.EndsWith(".mrk", StringComparison.OrdinalIgnoreCase))
+                         .ToList();
+            if (files.Count == 0) continue;
+            string localDir = Path.Combine(localRoot, folderName);
+            Directory.CreateDirectory(localDir);
+            foreach (string f in files)
+            {
+                t.Download(Join(remoteDir, f), Path.Combine(localDir, f));
+                total++;
+            }
+        }
+        return new RecordDownloadResult(total, localRoot);
+    }
+
+    /// <summary>Publishes each base's per-record files into <c>latest/&lt;folder&gt;/</c>,
+    /// then deletes any server <c>.mrk</c> there that no longer has a record (so a
+    /// deleted record's file does not linger). Returns the number of files uploaded.</summary>
+    private static int PublishRecordFolders(
+        ISftpTransport t, string work, string latestDir, IReadOnlyList<RecordFolder> folders)
+    {
+        int total = 0;
+        foreach (var (_, folderName) in DbSnapshotSource.Folders)
+        {
+            var desired = folders.FirstOrDefault(f => f.Name == folderName)?.Files
+                          ?? (IReadOnlyList<RecordFile>)Array.Empty<RecordFile>();
+            string dir = Join(latestDir, folderName);
+            var existing = t.List(dir);
+
+            if (desired.Count > 0) t.EnsureDirectory(dir);
+            foreach (var file in desired)
+            {
+                string local = Path.Combine(work, folderName + "-" + file.Name);
+                File.WriteAllBytes(local, file.Content);
+                UploadAtomic(t, local, Join(dir, file.Name));
+                total++;
+            }
+
+            var keep = new HashSet<string>(desired.Select(f => f.Name), StringComparer.Ordinal);
+            foreach (string name in existing)
+                if (name.EndsWith(".mrk", StringComparison.OrdinalIgnoreCase) && !keep.Contains(name))
+                    t.Delete(Join(dir, name));
+        }
+        return total;
     }
 
     private static void UploadAtomic(ISftpTransport t, string local, string remoteFinal)

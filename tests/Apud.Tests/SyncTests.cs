@@ -176,7 +176,7 @@ public class SyncTests : IDisposable
         var service = new SyncService(() => server, "catalog");
         var settings = new SyncSettings { Host = "h", User = "u", KeyPath = "k", RemoteRoot = "apud", Retention = 2 };
         var source = new FakeSnapshotSource(dbBytes: new byte[] { 9, 9 },
-            exports: new[] { ("BIB.mrk", new byte[] { 1 }), ("AUT.mrk", new byte[] { 2 }) });
+            folders: new[] { Folder("bib", ("1.mrk", 1), ("2.mrk", 2)), Folder("aut", ("1.mrk", 3)) });
 
         var utc = new DateTime(2026, 8, 1, 12, 0, 0, DateTimeKind.Utc);
         var result = service.Upload(source, settings, utc);
@@ -184,20 +184,68 @@ public class SyncTests : IDisposable
         string newName = "catalog-20260801-120000.db";
         Assert.Equal($"apud/snapshots/{newName}", result.RemoteSnapshot);
 
-        // The dated snapshot and both latest/ paths exist as FINAL files (no leftover .tmp).
+        // The dated snapshot and latest/ db exist as FINAL files (no leftover .tmp).
         Assert.True(server.Files.ContainsKey($"apud/snapshots/{newName}"));
         Assert.True(server.Files.ContainsKey("apud/latest/catalog.db"));
-        Assert.True(server.Files.ContainsKey("apud/latest/BIB.mrk"));
-        Assert.True(server.Files.ContainsKey("apud/latest/AUT.mrk"));
         Assert.DoesNotContain(server.Files.Keys, k => k.EndsWith(".tmp"));
+
+        // Per-record .mrk files land in bib/ and aut/ — the MARC_OUT shape, not one blob.
+        Assert.True(server.Files.ContainsKey("apud/latest/bib/1.mrk"));
+        Assert.True(server.Files.ContainsKey("apud/latest/bib/2.mrk"));
+        Assert.True(server.Files.ContainsKey("apud/latest/aut/1.mrk"));
+        Assert.False(server.Files.ContainsKey("apud/latest/BIB.mrk")); // no concatenated file
+        Assert.Equal(3, result.RecordFiles);
 
         // Retention: keep the newest 2 (the just-uploaded one + …0003), prune …0001 and …0002.
         Assert.Equal(2, result.Pruned);
         Assert.False(server.Files.ContainsKey("apud/snapshots/catalog-20260101-000001.db"));
         Assert.False(server.Files.ContainsKey("apud/snapshots/catalog-20260101-000002.db"));
         Assert.True(server.Files.ContainsKey("apud/snapshots/catalog-20260101-000003.db"));
+    }
 
-        Assert.Equal(new[] { "BIB.mrk", "AUT.mrk" }, result.Exports);
+    [Fact]
+    public void Upload_removes_a_deleted_records_file_and_the_legacy_blob()
+    {
+        var server = new FakeSftpTransport();
+        // A prior backup left three bib files, an old concatenated BIB.mrk, and a foreign file.
+        server.Files["apud/latest/bib/1.mrk"] = new byte[] { 1 };
+        server.Files["apud/latest/bib/2.mrk"] = new byte[] { 2 };
+        server.Files["apud/latest/bib/9.mrk"] = new byte[] { 9 };   // record since deleted
+        server.Files["apud/latest/BIB.mrk"] = new byte[] { 0 };     // legacy one-file export
+        server.Files["apud/latest/bib/readme.txt"] = new byte[] { 7 }; // not a .mrk → left alone
+
+        var service = new SyncService(() => server, "catalog");
+        var settings = new SyncSettings { Host = "h", User = "u", KeyPath = "k", RemoteRoot = "apud", Retention = 5 };
+        var source = new FakeSnapshotSource(new byte[] { 9 },
+            new[] { Folder("bib", ("1.mrk", 1), ("2.mrk", 2)) }); // 9.mrk no longer present
+
+        service.Upload(source, settings, new DateTime(2026, 8, 1, 12, 0, 0, DateTimeKind.Utc));
+
+        Assert.True(server.Files.ContainsKey("apud/latest/bib/1.mrk"));
+        Assert.True(server.Files.ContainsKey("apud/latest/bib/2.mrk"));
+        Assert.False(server.Files.ContainsKey("apud/latest/bib/9.mrk")); // straggler pruned
+        Assert.False(server.Files.ContainsKey("apud/latest/BIB.mrk"));   // legacy blob removed
+        Assert.True(server.Files.ContainsKey("apud/latest/bib/readme.txt")); // non-.mrk untouched
+    }
+
+    [Fact]
+    public void DownloadRecordFolders_writes_bib_and_aut_files_locally()
+    {
+        var server = new FakeSftpTransport();
+        server.Files["apud/latest/bib/1.mrk"] = new byte[] { 1 };
+        server.Files["apud/latest/bib/2.mrk"] = new byte[] { 2 };
+        server.Files["apud/latest/aut/5.mrk"] = new byte[] { 5 };
+        server.Files["apud/latest/bib/notes.txt"] = new byte[] { 0 }; // not a record file
+
+        var service = new SyncService(() => server, "catalog");
+        string root = Path.Combine(_dir, "restored-records");
+        var result = service.DownloadRecordFolders(new SyncSettings { RemoteRoot = "apud" }, root);
+
+        Assert.Equal(3, result.Files);
+        Assert.Equal(new byte[] { 1 }, File.ReadAllBytes(Path.Combine(root, "bib", "1.mrk")));
+        Assert.Equal(new byte[] { 2 }, File.ReadAllBytes(Path.Combine(root, "bib", "2.mrk")));
+        Assert.Equal(new byte[] { 5 }, File.ReadAllBytes(Path.Combine(root, "aut", "5.mrk")));
+        Assert.False(File.Exists(Path.Combine(root, "bib", "notes.txt")));
     }
 
     [Fact]
@@ -207,7 +255,7 @@ public class SyncTests : IDisposable
         var service = new SyncService(() => server, "catalog");
         var settings = new SyncSettings { Host = "h", User = "u", KeyPath = "k", RemoteRoot = "apud", Retention = 5 };
 
-        service.Upload(new FakeSnapshotSource(new byte[] { 7 }, Array.Empty<(string, byte[])>()),
+        service.Upload(new FakeSnapshotSource(new byte[] { 7 }, Array.Empty<RecordFolder>()),
             settings, new DateTime(2026, 8, 1, 8, 0, 0, DateTimeKind.Utc));
 
         // Every write to a final path was preceded by a matching .tmp upload then a rename.
@@ -254,7 +302,7 @@ public class SyncTests : IDisposable
     {
         var server = new FakeSftpTransport { SeenFingerprint = "SHA256:seen" };
         var service = new SyncService(() => server, "catalog");
-        var result = service.Upload(new FakeSnapshotSource(new byte[] { 1 }, Array.Empty<(string, byte[])>()),
+        var result = service.Upload(new FakeSnapshotSource(new byte[] { 1 }, Array.Empty<RecordFolder>()),
             new SyncSettings { RemoteRoot = "apud", Retention = 5 },
             new DateTime(2026, 8, 1, 0, 0, 0, DateTimeKind.Utc));
 
@@ -296,14 +344,16 @@ public class SyncTests : IDisposable
     private sealed class FakeSnapshotSource : ISnapshotSource
     {
         private readonly byte[] _dbBytes;
-        private readonly IReadOnlyList<(string, byte[])> _exports;
-        public FakeSnapshotSource(byte[] dbBytes, IReadOnlyList<(string, byte[])> exports)
-        { _dbBytes = dbBytes; _exports = exports; }
+        private readonly IReadOnlyList<RecordFolder> _folders;
+        public FakeSnapshotSource(byte[] dbBytes, IReadOnlyList<RecordFolder> folders)
+        { _dbBytes = dbBytes; _folders = folders; }
 
         public void WriteDatabaseCopy(string destPath) => File.WriteAllBytes(destPath, _dbBytes);
-        public IReadOnlyList<(string Name, byte[] Content)> Exports() =>
-            _exports.Select(e => (e.Item1, e.Item2)).ToList();
+        public IReadOnlyList<RecordFolder> RecordFolders() => _folders;
     }
+
+    private static RecordFolder Folder(string name, params (string, byte)[] files) =>
+        new(name, files.Select(f => new RecordFile(f.Item1, new[] { f.Item2 })).ToList());
 
     /// <summary>An in-memory SFTP server: a path→bytes map plus logs so tests can
     /// assert the tmp→rename atomic protocol was actually followed.</summary>

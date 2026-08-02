@@ -1935,9 +1935,9 @@ public sealed class MainForm : Form
             }
 
             _pushesSinceSync = 0;
-            string exports = result.Exports.Count > 0 ? $" + {string.Join(" + ", result.Exports)}" : "";
+            string records = result.RecordFiles > 0 ? $" + {result.RecordFiles} record file(s)" : "";
             string pruned = result.Pruned > 0 ? $" Pruned {result.Pruned} old snapshot(s)." : "";
-            SetMessage($"Backed up {Path.GetFileName(result.RemoteSnapshot)}{exports} → {settings.RemoteRoot}.{pruned}");
+            SetMessage($"Backed up {Path.GetFileName(result.RemoteSnapshot)}{records} → {settings.RemoteRoot}.{pruned}");
         }
         catch (Exception ex)
         {
@@ -2006,12 +2006,53 @@ public sealed class MainForm : Form
         }
         finally { Cursor.Current = Cursors.Default; }
 
+        // Same logic as the snapshot download, applied to the physical .mrk records: an
+        // optional pull of the whole bib/ + aut/ tree into a folder the user picks.
+        int? records = OfferRecordFolderDownload(settings, passphrase);
+        string recNote = records is int n
+            ? (n > 0 ? $" {n} record file(s) downloaded." : " No record files on the server.")
+            : "";
+
         if (MessageBox.Show(this,
                 $"Downloaded to {Path.GetFileName(save.FileName)}.\n\nOpen it now as a separate catalogue?",
                 "Restore", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
             OpenCatalog(save.FileName);
         else
-            SetMessage($"Snapshot saved to {save.FileName}.");
+            SetMessage($"Snapshot saved to {Path.GetFileName(save.FileName)}.{recNote}");
+    }
+
+    /// <summary>Offers to also download the published per-record .mrk folders (bib/ + aut/)
+    /// into a folder the user chooses. Returns the number of files downloaded, or null if
+    /// the user declined the offer, cancelled the folder pick, or it failed.</summary>
+    private int? OfferRecordFolderDownload(SyncSettings settings, string? passphrase)
+    {
+        if (MessageBox.Show(this,
+                "Also download the record files (.mrk)?\n\nThey arrive as bib/ and aut/ sub-folders in a folder you choose; files of the same name are replaced.",
+                "Restore records", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            return null;
+
+        using var pick = new FolderBrowserDialog
+        {
+            Description = "Choose a folder for the record files (bib/ and aut/ go inside it)",
+            UseDescriptionForTitle = true,
+            SelectedPath = StartFolder(),
+        };
+        if (pick.ShowDialog(this) != DialogResult.OK) return null;
+        RememberFolder(pick.SelectedPath);
+
+        Cursor.Current = Cursors.WaitCursor;
+        try
+        {
+            return SyncServiceFor(settings, passphrase)
+                .DownloadRecordFolders(settings, pick.SelectedPath).Files;
+        }
+        catch (Exception ex)
+        {
+            Cursor.Current = Cursors.Default;
+            MessageBox.Show(this, ex.Message, "Restore records", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return null;
+        }
+        finally { Cursor.Current = Cursors.Default; }
     }
 
     /// <summary>A plain list picker for the server snapshots (newest first).</summary>
