@@ -32,6 +32,18 @@ public sealed class SshNetSftpTransport : ISftpTransport
     /// missing/undecryptable private key.</summary>
     public void Connect()
     {
+        // The commonest mistake by far is picking the .pub file. SSH authenticates
+        // with the PRIVATE key; catch a public key up front with a plain message
+        // rather than letting it surface as an opaque parse or auth failure.
+        if (!File.Exists(_settings.KeyPath))
+            throw new SyncException($"Private key not found:\n{_settings.KeyPath}");
+        if (LooksLikePublicKey(_settings.KeyPath))
+            throw new SyncException(
+                "That is a PUBLIC key (.pub) — SSH logs in with the PRIVATE key.\n\n" +
+                $"You chose:\n{_settings.KeyPath}\n\n" +
+                "Choose the matching file WITHOUT the .pub extension (its contents begin " +
+                "with \"-----BEGIN … PRIVATE KEY-----\").");
+
         PrivateKeyFile key;
         try
         {
@@ -39,14 +51,12 @@ public sealed class SshNetSftpTransport : ISftpTransport
                 ? new PrivateKeyFile(_settings.KeyPath)
                 : new PrivateKeyFile(_settings.KeyPath, _passphrase);
         }
-        catch (FileNotFoundException)
-        {
-            throw new SyncException($"Private key not found:\n{_settings.KeyPath}");
-        }
-        catch (Exception e) when (e is SshException or System.Security.Cryptography.CryptographicException)
+        catch (Exception e) when (e is SshException or System.Security.Cryptography.CryptographicException or FormatException)
         {
             throw new SyncException(
-                "The private key could not be read — check the passphrase and that the file is an OpenSSH/PEM key.");
+                "The private key could not be read. If it has a passphrase, enter it; " +
+                "otherwise check the file is an unencrypted OpenSSH or PEM private key " +
+                "(PuTTY .ppk files are not supported — export it as OpenSSH first).");
         }
 
         var info = new ConnectionInfo(_settings.Host, _settings.Port, _settings.User,
@@ -68,6 +78,35 @@ public sealed class SshNetSftpTransport : ISftpTransport
                 "If you rebuilt or reinstalled the server, use \"Forget host key\" in " +
                 "File → Server → Set Server and connect again. Otherwise do NOT proceed.");
         }
+        catch (SshAuthenticationException)
+        {
+            throw new SyncException(
+                $"The server refused the key (permission denied) for user \"{_settings.User}\".\n\n" +
+                "The connection and host key were fine, so this is an authorization problem:\n" +
+                "• is the username correct for this server?\n" +
+                "• is this key's .pub line in the server's ~/.ssh/authorized_keys for that user?");
+        }
+    }
+
+    /// <summary>True if the file is an SSH public key (an OpenSSH one-line
+    /// <c>ssh-… / ecdsa-… / sk-…</c> form, or simply a <c>.pub</c> name) rather than a
+    /// private key. A cheap first-line peek — the guard, not a full parser.</summary>
+    internal static bool LooksLikePublicKey(string path)
+    {
+        if (path.EndsWith(".pub", StringComparison.OrdinalIgnoreCase)) return true;
+        try
+        {
+            foreach (string raw in File.ReadLines(path))
+            {
+                string line = raw.Trim();
+                if (line.Length == 0) continue;
+                return line.StartsWith("ssh-", StringComparison.Ordinal)
+                    || line.StartsWith("ecdsa-", StringComparison.Ordinal)
+                    || line.StartsWith("sk-", StringComparison.Ordinal);
+            }
+        }
+        catch { /* unreadable → let the real key loader report it */ }
+        return false;
     }
 
     private void OnHostKey(object? sender, HostKeyEventArgs e)

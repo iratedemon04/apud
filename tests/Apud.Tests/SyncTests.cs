@@ -246,6 +246,26 @@ public class SyncTests : IDisposable
         Assert.Equal("SHA256:seen", result.SeenFingerprint);
     }
 
+    // ---------- public-key guard (the .pub trap) ----------
+
+    [Fact]
+    public void A_public_key_is_recognised_and_a_private_key_is_not()
+    {
+        string pubByName = Path.Combine(_dir, "id_ed25519.pub");
+        File.WriteAllText(pubByName, "ssh-ed25519 AAAAC3Nza... user@host");
+        string pubByContent = Path.Combine(_dir, "some_key");
+        File.WriteAllText(pubByContent, "ssh-rsa AAAAB3Nza... user@host");
+        string privatePem = Path.Combine(_dir, "id_rsa");
+        File.WriteAllText(privatePem, "-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----");
+        string privateOpenssh = Path.Combine(_dir, "id_ed25519");
+        File.WriteAllText(privateOpenssh, "-----BEGIN OPENSSH PRIVATE KEY-----\nb3Blbn...\n-----END OPENSSH PRIVATE KEY-----");
+
+        Assert.True(SshNetSftpTransport.LooksLikePublicKey(pubByName));     // .pub extension
+        Assert.True(SshNetSftpTransport.LooksLikePublicKey(pubByContent));  // ssh-… first line
+        Assert.False(SshNetSftpTransport.LooksLikePublicKey(privatePem));
+        Assert.False(SshNetSftpTransport.LooksLikePublicKey(privateOpenssh));
+    }
+
     private static StoredRecord Bib(string cn, string title)
     {
         var r = new MarcRecord { Leader = "00000nam a2200000 i 4500" };
