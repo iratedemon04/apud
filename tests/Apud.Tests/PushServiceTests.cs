@@ -68,12 +68,12 @@ public class PushServiceTests : IDisposable
     [Fact]
     public void Push_fills_003_from_the_org_code_when_set()
     {
-        Repo.SetSetting("org_code", "MX-MxBAC");
+        Repo.SetSetting("org_code", "XX-XxLib");
         var rec = new StoredRecord("BIB", CleanBib());
         Push(rec);
 
         var record = Repo.Load(rec.Id)!.Record;
-        Assert.Equal("MX-MxBAC", record.FieldsWithTag("003").Single().ControlData);
+        Assert.Equal("XX-XxLib", record.FieldsWithTag("003").Single().ControlData);
     }
 
     [Fact]

@@ -20,65 +20,53 @@ public sealed class FirstRunForm : Form
     {
         _catalogOpen = catalogOpen;
 
-        Text = "Welcome to Apud — Setup";
+        Text = "Apud — Setup";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
         MaximizeBox = false;
-        ClientSize = new Size(500, 380);
+        ClientSize = new Size(440, 190);
 
         var intro = new Label
         {
             Dock = DockStyle.Top,
-            Height = 232,
-            Padding = new Padding(16, 14, 16, 0),
+            Height = 84,
+            Padding = new Padding(16, 16, 16, 0),
             Font = new Font("Segoe UI", 9.75f),
             Text =
-                "Apud is a MARC21 original-cataloguing editor. A few things to know:\n\n" +
-                "1.  A catalogue is a single database file. Create one now, or open one\n" +
-                "     you already have. Apud never opens a catalogue on its own — you\n" +
-                "     choose it consciously each session.\n\n" +
-                "2.  Your record content comes from YOUR templates. Keep a .mrk template\n" +
-                "     per book series / magazine / record type in the templates folder\n" +
-                "     beside Apud; press Ctrl+N to start a record from one, or Ctrl+T to\n" +
-                "     save the record you're on as a new template.\n\n" +
-                "3.  Apud fills in only the mechanical data on push (Ctrl+L): the 001\n" +
-                "     control number, the 005 timestamp and the leader lengths. Every\n" +
-                "     other byte — org code, language, classification — is yours, typed\n" +
-                "     or carried by the template.\n\n" +
-                "4.  Keys are yours too: edit keymap.json beside Apud to rebind anything.\n" +
-                "     Press F1 on a field any time for its MARC21 help.",
+                "Create a new catalogue or open an existing one to begin. Records are " +
+                "built from your templates (Ctrl+N). Press F1 on a field for help.",
         };
 
         var newBtn = new Button
         {
-            Text = "Create a &New Catalogue…",
-            Size = new Size(220, 32),
-            Location = new Point(16, 250),
+            Text = "&New Catalogue…",
+            Size = new Size(196, 32),
+            Location = new Point(16, 96),
         };
         newBtn.Click += (_, _) => { newCatalog(); RefreshStatus(); };
 
         var openBtn = new Button
         {
-            Text = "&Open an Existing Catalogue…",
-            Size = new Size(220, 32),
-            Location = new Point(250, 250),
+            Text = "&Open Catalogue…",
+            Size = new Size(196, 32),
+            Location = new Point(224, 96),
         };
         openBtn.Click += (_, _) => { openCatalog(); RefreshStatus(); };
 
         _status = new Label
         {
-            Location = new Point(16, 296),
-            Size = new Size(468, 36),
-            Font = new Font("Segoe UI", 9.75f, FontStyle.Italic),
+            Location = new Point(16, 138),
+            Size = new Size(404, 20),
+            Font = new Font("Segoe UI", 9.75f),
         };
 
         var done = new Button
         {
-            Text = "Done",
+            Text = "Close",
             DialogResult = DialogResult.OK,
             Size = new Size(90, 30),
-            Location = new Point(394, 338),
+            Location = new Point(334, 150),
             Anchor = AnchorStyles.Right | AnchorStyles.Bottom,
         };
 
@@ -94,6 +82,6 @@ public sealed class FirstRunForm : Form
 
     private void RefreshStatus() =>
         _status.Text = _catalogOpen()
-            ? "Catalogue open — you're ready. Close this, then press Ctrl+N to start your first record."
-            : "No catalogue open yet — create or open one above to get started.";
+            ? "Catalogue open. Close this window, then press Ctrl+N to start a record."
+            : "No catalogue open.";
 }

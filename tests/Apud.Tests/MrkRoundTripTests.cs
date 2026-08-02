@@ -17,7 +17,7 @@ public class MrkRoundTripTests
         "=001  1\n" +
         "=005  20260415154259.0\n" +
         "=008  260415s2017    mx            000 0 spa d\n" +
-        "=040  \\\\$aMX-MxBAC$bspa$erda\n" +
+        "=040  \\\\$aXX-XxLib$bspa$erda\n" +
         "=082  04$a539.7$bM843 2017$220\n" +
         "=100  1\\$aMoreno, Matías$eautor\n" +
         "=245  10$aGrandes proyectos científicos: Sincrotrón\n" +

@@ -2,11 +2,11 @@ namespace Marc.Core.Mrk;
 
 /// <summary>
 /// Reads MARCMaker-style .mrk text (the dialect Apud treats as canonical, matching
-/// MarcEdit and the BAC catalogue's existing files):
+/// MarcEdit and other real-world files):
 ///
 ///   =LDR  00766nam a22002534i 4500
 ///   =008  260415s2017    mx            000 0 spa d
-///   =040  \\$aMX-MxBAC$bspa$erda
+///   =040  \\$aXX-XxLib$bspa$erda
 ///   =650  \4$aFísica nuclear$xInvestigación
 ///
 /// Rules: "=TAG" + two spaces; '\' = blank indicator; '$x' starts a subfield;

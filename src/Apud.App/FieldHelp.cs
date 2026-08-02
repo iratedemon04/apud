@@ -96,7 +96,7 @@ public static class FieldHelp
     {
         ["LDR"] = "Leader — 24 fixed positions describing the record itself: record status (05), type of record (06) and bibliographic level (07), which together pick the 008 layout, plus the encoding level (17). Apud recomputes the length and base-address positions on push; you set the coded meanings. Edit it position-by-position with Ctrl+F3.",
         ["001"] = "Control Number — the record's own number in this system (its accession/001). Apud fills it on push only when empty, as the current highest number in the base plus one; a number you type is kept forever and never renumbered. Not repeatable.",
-        ["003"] = "Control Number Identifier — the MARC organization code of the agency in field 001 (e.g. MX-MxBAC). If you use it, put it in your template; Apud does not write it for you.",
+        ["003"] = "Control Number Identifier — the MARC organization code of the agency that assigned the number in 001. Apud fills 003 on push from the code set in File, Set Organization Code; when no code is set it writes nothing here.",
         ["005"] = "Date and Time of Latest Transaction — yyyymmddhhmmss.f. Apud stamps this automatically on every push; you never type it.",
         ["006"] = "Fixed-Length Data — Additional Material Characteristics — a second fixed field for aspects a single 008 cannot capture (e.g. a book that is also a serial). Its first byte picks the layout, mirroring the 008.",
         ["007"] = "Physical Description Fixed Field — coded physical form (its first byte is the category of material: maps, sound recordings, electronic resources...). Position-coded like the 008.",

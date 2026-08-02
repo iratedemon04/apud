@@ -19,7 +19,7 @@ public class RecordRepositoryTests : IDisposable
         "=LDR  00766nam a22002534i 4500\n" +
         "=001  1\n" +
         "=008  260415s2017    mx            000 0 spa d\n" +
-        "=040  \\\\$aMX-MxBAC$bspa$erda\n" +
+        "=040  \\\\$aXX-XxLib$bspa$erda\n" +
         "=100  1\\$aMoreno, Matías$eautor\n" +
         "=245  10$aGrandes proyectos científicos: Sincrotrón\n" +
         "=264  \\1$aMéxico$bEl Colegio Nacional$c2017\n" +
@@ -186,9 +186,9 @@ public class RecordRepositoryTests : IDisposable
     public void Settings_roundtrip_and_overwrite()
     {
         Assert.Null(Repo.GetSetting("org_code"));
-        Repo.SetSetting("org_code", "MX-MxBAC");
-        Repo.SetSetting("org_code", "MX-MxBAC2");
-        Assert.Equal("MX-MxBAC2", Repo.GetSetting("org_code"));
+        Repo.SetSetting("org_code", "XX-XxLib");
+        Repo.SetSetting("org_code", "XX-XxLib2");
+        Assert.Equal("XX-XxLib2", Repo.GetSetting("org_code"));
     }
 
     [Fact]

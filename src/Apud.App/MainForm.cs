@@ -1481,6 +1481,17 @@ public sealed class MainForm : Form
         _viewer.EndEdit();
 
         var doc = _currentDoc;
+
+        // Already pushed and untouched since: there is nothing to write. Skip the
+        // whole cycle so a repeat Ctrl+L doesn't restamp 005, rewrite the row, or
+        // rewrite the .mrk for no reason.
+        if (doc.Stored.Status == RecordStatus.Pushed && !doc.Dirty)
+        {
+            ClearFindings();
+            SetMessage($"{doc.Record.ControlNumber} is already pushed and unchanged.");
+            return;
+        }
+
         var profile = ValidationProfileConfig.For(doc.Stored.Base);
 
         // A brief, visible beat so the push reads as a real action (same as Ctrl+W).
@@ -1649,16 +1660,15 @@ public sealed class MainForm : Form
         string current = _repo.GetSetting("org_code") ?? "";
         if (PromptForText(
                 "Set Organization Code",
-                "MARC organization code (e.g. MX-MxBAC). Apud stamps it into 003 on\n" +
-                "push. Leave blank to turn 003 auto-fill off.",
+                "MARC organization code for field 003. Leave blank for none.",
                 current) is not string entered)
-            return; // cancelled — nothing changes
+            return; // cancelled, nothing changes
 
         string code = entered.Trim();
         _repo.SetSetting("org_code", code);
         SetMessage(code.Length > 0
-            ? $"Organization code set — 003 will be filled with \"{code}\" on push."
-            : "Organization code cleared — 003 will no longer be auto-filled.");
+            ? $"Organization code set to {code}."
+            : "Organization code cleared.");
     }
 
     /// <summary>A minimal one-line text prompt (WinForms ships no InputBox). Returns the
