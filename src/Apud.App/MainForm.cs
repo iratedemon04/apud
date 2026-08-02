@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Apud.Data;
 using Apud.Sync;
 using Marc.Core;
@@ -95,7 +96,7 @@ public sealed class MainForm : Form
         _commands.Add(new Command { Id = "base.aut", Name = "&AUT — Authority", Execute = () => SetBase("AUT") });
         _commands.Add(new Command { Id = "search.focus", Name = "&Search", DefaultKey = "F2", Execute = ShowSearchView });
         _commands.Add(new Command { Id = "help.field", Name = "&Field Help", DefaultKey = "F1", Execute = ShowFieldHelp });
-        _commands.Add(new Command { Id = "help.setup", Name = "&Setup Wizard...", Execute = ShowSetupWizard });
+        _commands.Add(new Command { Id = "help.intro", Name = "&Getting Started", Execute = ShowIntro });
         _commands.Add(new Command { Id = "help.about", Name = "&About Apud", Execute = ShowAbout });
         // Editor commands (Module 6 steps 3-7). §6.2: record commands own the keyboard.
         _commands.Add(new Command { Id = "record.new", Name = "&New Record / Copy", DefaultKey = "Ctrl+N", Execute = NewRecord });
@@ -179,7 +180,7 @@ public sealed class MainForm : Form
 
         var help = new ToolStripMenuItem("&Help");
         help.DropDownItems.Add(MenuItem("help.field"));
-        help.DropDownItems.Add(MenuItem("help.setup"));
+        help.DropDownItems.Add(MenuItem("help.intro"));
         help.DropDownItems.Add(new ToolStripSeparator());
         help.DropDownItems.Add(MenuItem("help.about"));
 
@@ -451,7 +452,7 @@ public sealed class MainForm : Form
             SetMessage(configReports.Count > 0
                 ? string.Join("  |  ", configReports)
                 : "No catalogue open — File → New Catalogue or Open Catalogue.");
-            MaybeShowFirstRun();
+            MaybeShowIntro();
         };
         FormClosing += OnFormClosing;
         FormClosed += (_, _) => _db?.Dispose();
@@ -515,23 +516,23 @@ public sealed class MainForm : Form
         _viewer.Focus();
     }
 
-    /// <summary>Help → Setup: the orientation wizard. Reachable any time; also shown
-    /// once on a fresh install by <see cref="MaybeShowFirstRun"/>.</summary>
-    private void ShowSetupWizard()
+    /// <summary>Help → Getting Started: the terse three-step intro. Reachable any
+    /// time; also shown once on a fresh install by <see cref="MaybeShowIntro"/>.</summary>
+    private void ShowIntro()
     {
-        using var wiz = new FirstRunForm(NewCatalog, OpenCatalogDialog, () => _repo is not null);
-        wiz.ShowDialog(this);
+        using var intro = new IntroForm();
+        intro.ShowDialog(this);
     }
 
-    /// <summary>Auto-shows the Setup wizard exactly once on a clean install, then
-    /// records that so it never appears on its own again (Help → Setup still opens
+    /// <summary>Auto-shows the intro exactly once on a clean install, then records
+    /// that so it never appears on its own again (Help → Getting Started still opens
     /// it). This is one-time onboarding, not remembered session state.</summary>
-    private void MaybeShowFirstRun()
+    private void MaybeShowIntro()
     {
         if (_appState.FirstRunDone) return;
         _appState.FirstRunDone = true;
         _appState.Save();
-        ShowSetupWizard();
+        ShowIntro();
     }
 
     private void ShowAbout()
@@ -781,7 +782,7 @@ public sealed class MainForm : Form
 
     private void RunSearch()
     {
-        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+        if (!RequireCatalogue()) return;
         string query = _searchBox.Text.Trim();
         if (query.Length == 0) return;
 
@@ -799,7 +800,7 @@ public sealed class MainForm : Form
     /// <summary>The explicit whole-base listing (control-number order).</summary>
     private void ListAll()
     {
-        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+        if (!RequireCatalogue()) return;
         var list = _repo.List(CurrentBase);
         FillResults(list);
         SetMessage($"{CurrentBase}: {list.Count} record(s).");
@@ -1416,7 +1417,7 @@ public sealed class MainForm : Form
     /// records"). The write goes through EditorDocument, so Ctrl+Z reverts it.</summary>
     private void BrowseAndLinkHeading()
     {
-        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+        if (!RequireCatalogue()) return;
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
         _viewer.EndEdit();
 
@@ -1474,7 +1475,7 @@ public sealed class MainForm : Form
     /// says so.</summary>
     private void ValidateRecord()
     {
-        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+        if (!RequireCatalogue()) return;
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
         _viewer.EndEdit();
 
@@ -1503,7 +1504,7 @@ public sealed class MainForm : Form
     /// authority record, ripples into its linked bibs.</summary>
     private void PushRecord()
     {
-        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+        if (!RequireCatalogue()) return;
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
         _viewer.EndEdit();
 
@@ -1683,7 +1684,7 @@ public sealed class MainForm : Form
     /// (that was cut Module 10); it mirrors the Set … Output Folder commands.</summary>
     private void SetOrgCode()
     {
-        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+        if (!RequireCatalogue()) return;
 
         string current = _repo.GetSetting("org_code") ?? "";
         if (PromptForText(
@@ -1742,7 +1743,7 @@ public sealed class MainForm : Form
 
     private void SetMarcOutFolder(string @base)
     {
-        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+        if (!RequireCatalogue()) return;
 
         var (key, defaultName) = MarcOutSpec(@base);
         string? current = _repo.GetSetting(key);
@@ -1762,10 +1763,10 @@ public sealed class MainForm : Form
 
     // ---------- server backup / publish (Module 11, docs/PLAN.md §9b) ----------
 
-    /// <summary>File → Server → Set Server: the per-catalogue backup target.</summary>
+    /// <summary>File → Backup Server → Set Server: the per-catalogue backup target.</summary>
     private void ConfigureSync()
     {
-        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+        if (!RequireCatalogue()) return;
 
         using var form = new SyncSettingsForm(SyncSettings.Load(_repo));
         if (form.ShowDialog(this) != DialogResult.OK) return;
@@ -1792,16 +1793,16 @@ public sealed class MainForm : Form
             $"Passphrase for {Path.GetFileName(settings.KeyPath)} — leave blank if the key has none.",
             "", mask: true);
 
-    /// <summary>File → Server → Back Up to Server: VACUUM-INTO snapshot + latest/ refresh,
+    /// <summary>File → Backup Server → Back Up to Server: VACUUM-INTO snapshot + latest/ refresh,
     /// uploaded atomically, then old snapshots pruned to the keep-N.</summary>
     private void UploadToServer()
     {
-        if (_repo is null || _db is null) { SetMessage("Open a catalogue first."); return; }
+        if (!RequireCatalogue() || _db is null) return;
 
         var settings = SyncSettings.Load(_repo);
         if (!settings.IsConfigured)
         {
-            SetMessage("Configure the server first — File → Server → Set Server.");
+            SetMessage("Configure the server first — File → Backup Server → Set Server.");
             return;
         }
 
@@ -1836,18 +1837,18 @@ public sealed class MainForm : Form
         finally { Cursor.Current = Cursors.Default; }
     }
 
-    /// <summary>File → Server → Restore from Server: pick a server snapshot, download it
+    /// <summary>File → Backup Server → Restore from Server: pick a server snapshot, download it
     /// to a local file, and (optionally) open that copy side-by-side. The working
     /// catalogue is never overwritten — restoring is opening a downloaded copy, a
     /// conscious act, not an automatic replace.</summary>
     private void RestoreFromServer()
     {
-        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+        if (!RequireCatalogue()) return;
 
         var settings = SyncSettings.Load(_repo);
         if (!settings.IsConfigured)
         {
-            SetMessage("Configure the server first — File → Server → Set Server.");
+            SetMessage("Configure the server first — File → Backup Server → Set Server.");
             return;
         }
 
@@ -1940,7 +1941,7 @@ public sealed class MainForm : Form
     /// record id, not the 001, so removing a record never breaks other records.</summary>
     private void DeleteRecord()
     {
-        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+        if (!RequireCatalogue()) return;
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
         var doc = _currentDoc;
 
@@ -2005,7 +2006,7 @@ public sealed class MainForm : Form
     /// record from a template.</summary>
     private void NewRecord()
     {
-        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+        if (!RequireCatalogue()) return;
 
         if (_recordView.Visible && _currentDoc is not null)
         {
@@ -2045,7 +2046,7 @@ public sealed class MainForm : Form
 
     private void SaveDraft()
     {
-        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+        if (!RequireCatalogue()) return;
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
         _viewer.EndEdit();
 
@@ -2104,7 +2105,7 @@ public sealed class MainForm : Form
     /// scope chosen inside Apud rather than by which menu item was clicked).</summary>
     private void ImportRecords()
     {
-        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+        if (!RequireCatalogue()) return;
         switch (ChooseImportSource())
         {
             case ImportSource.File: ImportFiles(); break;
@@ -2157,7 +2158,7 @@ public sealed class MainForm : Form
     /// BIB or AUT by its leader, same as a folder import.</summary>
     private void ImportFiles()
     {
-        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+        if (!RequireCatalogue()) return;
 
         using var dialog = new OpenFileDialog
         {
@@ -2178,7 +2179,7 @@ public sealed class MainForm : Form
     /// Records chooser).</summary>
     private void ImportFolder()
     {
-        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+        if (!RequireCatalogue()) return;
 
         using var dialog = new FolderBrowserDialog
         {
@@ -2226,7 +2227,7 @@ public sealed class MainForm : Form
 
     private void ExportBase()
     {
-        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+        if (!RequireCatalogue()) return;
         int count = _repo.List(CurrentBase).Count;
         if (count == 0) { SetMessage($"{CurrentBase} is empty — nothing to export."); return; }
         ExportTo($"{CurrentBase}.mrk", path =>
@@ -2238,7 +2239,7 @@ public sealed class MainForm : Form
 
     private void ExportSelected()
     {
-        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+        if (!RequireCatalogue()) return;
         var ids = _openList.SelectedItems.Cast<ListViewItem>()
             .Select(i => i.Tag).OfType<EditorDocument>()
             .Where(d => d.Stored.Id != 0).Select(d => d.Stored.Id).ToList();
@@ -2271,4 +2272,19 @@ public sealed class MainForm : Form
     }
 
     private void SetMessage(string text) => _messageLabel.Text = text;
+
+    /// <summary>Guard for the many commands that need an open catalogue. With none
+    /// open it shows a clear popup and returns false so the caller bails out — the
+    /// message-bar note alone was easy to miss, so a command like Set Server or Set
+    /// Organization Code just looked broken (user report 2026-08-01).</summary>
+    [MemberNotNullWhen(true, nameof(_repo))]
+    private bool RequireCatalogue()
+    {
+        if (_repo is not null) return true;
+        MessageBox.Show(this,
+            "First open a catalogue.\n\nUse File → New Catalogue to create one, " +
+            "or File → Open Catalogue to open an existing one.",
+            "No catalogue open", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        return false;
+    }
 }
