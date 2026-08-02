@@ -117,6 +117,8 @@ public sealed class MainForm : Form
     public MainForm()
     {
         Text = "Apud";
+        var iconStream = typeof(MainForm).Assembly.GetManifestResourceStream("Apud.App.apud.ico");
+        if (iconStream != null) Icon = new Icon(iconStream);
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(950, 620);
 

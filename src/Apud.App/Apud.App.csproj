@@ -26,6 +26,9 @@
     <Content Include="profile-bib.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="profile-aut.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="templates\*.mrk" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="..\..\resources\apud.ico">
+      <LogicalName>Apud.App.apud.ico</LogicalName>
+    </EmbeddedResource>
     <InternalsVisibleTo Include="Apud.Tests" />
   </ItemGroup>
 
