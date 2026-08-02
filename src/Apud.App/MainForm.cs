@@ -81,8 +81,7 @@ public sealed class MainForm : Form
         // Catalogue commands are menu-only (§6.2: record commands own the keyboard).
         _commands.Add(new Command { Id = "catalogue.new", Name = "&New Catalogue...", Execute = NewCatalog });
         _commands.Add(new Command { Id = "catalogue.open", Name = "&Open Catalogue...", DefaultKey = "Ctrl+O", Execute = OpenCatalogDialog });
-        _commands.Add(new Command { Id = "catalogue.import-file", Name = "&Import Records...", Execute = ImportFiles });
-        _commands.Add(new Command { Id = "catalogue.import-folder", Name = "Import Fol&der...", Execute = ImportFolder });
+        _commands.Add(new Command { Id = "catalogue.import", Name = "&Import Records...", Execute = ImportRecords });
         _commands.Add(new Command { Id = "catalogue.marc-out", Name = "Set &BIB Output Folder...", Execute = () => SetMarcOutFolder("BIB") });
         _commands.Add(new Command { Id = "catalogue.marc-out-aut", Name = "Set &Authority Output Folder...", Execute = () => SetMarcOutFolder("AUT") });
         _commands.Add(new Command { Id = "catalogue.org-code", Name = "Set &Organization Code...", Execute = SetOrgCode });
@@ -130,15 +129,14 @@ public sealed class MainForm : Form
         file.DropDownItems.Add(MenuItem("catalogue.new"));
         file.DropDownItems.Add(MenuItem("catalogue.open"));
         file.DropDownItems.Add(new ToolStripSeparator());
-        file.DropDownItems.Add(MenuItem("catalogue.import-file"));
-        file.DropDownItems.Add(MenuItem("catalogue.import-folder"));
+        file.DropDownItems.Add(MenuItem("catalogue.import"));
         file.DropDownItems.Add(MenuItem("catalogue.marc-out"));
         file.DropDownItems.Add(MenuItem("catalogue.marc-out-aut"));
         file.DropDownItems.Add(MenuItem("catalogue.org-code"));
         file.DropDownItems.Add(MenuItem("catalogue.export-base"));
         file.DropDownItems.Add(MenuItem("catalogue.export-selected"));
         file.DropDownItems.Add(new ToolStripSeparator());
-        var server = new ToolStripMenuItem("Ser&ver");
+        var server = new ToolStripMenuItem("&Backup Server");
         server.DropDownItems.Add(MenuItem("sync.configure"));
         server.DropDownItems.Add(MenuItem("sync.upload"));
         server.DropDownItems.Add(MenuItem("sync.restore"));
@@ -2100,11 +2098,63 @@ public sealed class MainForm : Form
 
     // ---------- import ----------
 
-    /// <summary>File → Import Records: pick one or more .mrk files (e.g. a single
-    /// authority file MarcEdit converted into your Downloads) and import just
-    /// those (user request 2026-08-01 — the user, not the folder, decides the
-    /// scope). Each record routes to BIB or AUT by its leader, same as a folder
-    /// import.</summary>
+    /// <summary>File → Import Records: one menu entry that first asks whether to
+    /// import a single file or a whole folder, then routes to the matching picker
+    /// (user request 2026-08-01 — the two former commands collapsed into one, the
+    /// scope chosen inside Apud rather than by which menu item was clicked).</summary>
+    private void ImportRecords()
+    {
+        if (_repo is null) { SetMessage("Open a catalogue first."); return; }
+        switch (ChooseImportSource())
+        {
+            case ImportSource.File: ImportFiles(); break;
+            case ImportSource.Folder: ImportFolder(); break;
+            // Cancel: do nothing.
+        }
+    }
+
+    private enum ImportSource { Cancel, File, Folder }
+
+    /// <summary>A tiny two-button chooser (single file vs. whole folder), in the
+    /// app's inline-dialog style (cf. PickSnapshot). Esc / Cancel = do nothing.</summary>
+    private ImportSource ChooseImportSource()
+    {
+        using var dialog = new Form
+        {
+            Text = "Import Records",
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            StartPosition = FormStartPosition.CenterParent,
+            MinimizeBox = false,
+            MaximizeBox = false,
+            ClientSize = new Size(372, 150),
+        };
+        var prompt = new Label
+        {
+            Text = "Import a single file, or every .mrk in a folder?",
+            Location = new Point(16, 18),
+            Size = new Size(340, 22),
+        };
+        var file = new Button { Text = "Single &File...", Size = new Size(160, 38), Location = new Point(16, 52) };
+        var folder = new Button { Text = "Whole F&older...", Size = new Size(160, 38), Location = new Point(196, 52) };
+        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Size = new Size(90, 28), Location = new Point(266, 110) };
+
+        var result = ImportSource.Cancel;
+        file.Click += (_, _) => { result = ImportSource.File; dialog.Close(); };
+        folder.Click += (_, _) => { result = ImportSource.Folder; dialog.Close(); };
+
+        dialog.Controls.Add(prompt);
+        dialog.Controls.Add(file);
+        dialog.Controls.Add(folder);
+        dialog.Controls.Add(cancel);
+        dialog.CancelButton = cancel;
+
+        dialog.ShowDialog(this);
+        return result;
+    }
+
+    /// <summary>Pick one or more .mrk files (e.g. a single authority file MarcEdit
+    /// converted into your Downloads) and import just those. Each record routes to
+    /// BIB or AUT by its leader, same as a folder import.</summary>
     private void ImportFiles()
     {
         if (_repo is null) { SetMessage("Open a catalogue first."); return; }
@@ -2124,7 +2174,8 @@ public sealed class MainForm : Form
         RunImport(source, new ImportEngine(_repo).Analyze(files));
     }
 
-    /// <summary>File → Import Folder: import every .mrk in a folder tree.</summary>
+    /// <summary>Import every .mrk in a folder tree (reached from the Import
+    /// Records chooser).</summary>
     private void ImportFolder()
     {
         if (_repo is null) { SetMessage("Open a catalogue first."); return; }

@@ -10,7 +10,7 @@
 // Plain unmodified letters/digits only fire while no text box has the cursor.
 //
 // Menu-only commands (bindable here if you want keys for them):
-//   catalogue.new, catalogue.import-file, catalogue.import-folder,
+//   catalogue.new, catalogue.import,
 //   catalogue.marc-out, catalogue.marc-out-aut, catalogue.export-base,
 //   catalogue.export-selected, base.bib, base.aut, help.about,
 //   sync.configure, sync.restore
