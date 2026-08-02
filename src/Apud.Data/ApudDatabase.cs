@@ -132,6 +132,23 @@ public sealed class ApudDatabase : IDisposable
             """);
     }
 
+    /// <summary>
+    /// Writes a transactionally consistent, compacted copy of this catalogue to
+    /// <paramref name="destPath"/> via SQLite's <c>VACUUM INTO</c>. Consistent even
+    /// mid-session with the connection open and WAL active — the copy never captures
+    /// a half-written page. The Sync module (docs/PLAN.md §9b) uploads this copy so a
+    /// backup is always a whole, openable database. Overwrites any file already there.
+    /// </summary>
+    public void VacuumInto(string destPath)
+    {
+        if (System.IO.File.Exists(destPath)) System.IO.File.Delete(destPath);
+        using var cmd = Connection.CreateCommand();
+        // The INTO argument is an SQL expression (SQLite ≥ 3.27), so it binds safely.
+        cmd.CommandText = "VACUUM INTO $dest;";
+        cmd.Parameters.AddWithValue("$dest", destPath);
+        cmd.ExecuteNonQuery();
+    }
+
     internal void Execute(string sql)
     {
         using var cmd = Connection.CreateCommand();

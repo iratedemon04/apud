@@ -196,6 +196,7 @@ public class KeymapTests
             Cmd("subfield.copy", context: CommandContext.Editor), Cmd("subfield.paste", context: CommandContext.Editor),
             Cmd("field.fixed-edit", context: CommandContext.Editor), Cmd("field.validate", context: CommandContext.Editor),
             Cmd("record.validate", context: CommandContext.Editor), Cmd("record.push", context: CommandContext.Editor),
+            Cmd("sync.upload"),
             Cmd("app.exit"));
         string shipped = Path.Combine(AppContext.BaseDirectory, Keymap.FileName);
 

@@ -4,6 +4,10 @@
     <ProjectReference Include="..\Apud.Data\Apud.Data.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="SSH.NET" Version="2024.2.0" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>

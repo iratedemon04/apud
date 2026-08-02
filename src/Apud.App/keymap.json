@@ -12,8 +12,10 @@
 // Menu-only commands (bindable here if you want keys for them):
 //   catalogue.new, catalogue.import-file, catalogue.import-folder,
 //   catalogue.marc-out, catalogue.marc-out-aut, catalogue.export-base,
-//   catalogue.export-selected, base.bib, base.aut, help.about
+//   catalogue.export-selected, base.bib, base.aut, help.about,
+//   sync.configure, sync.restore
 {
+  "sync.upload": "Ctrl+U",
   "catalogue.open": "Ctrl+O",
   "search.focus": "F2",
   "record.new": "Ctrl+N",
