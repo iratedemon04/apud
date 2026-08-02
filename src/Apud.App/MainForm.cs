@@ -32,10 +32,12 @@ public sealed class MainForm : Form
 
     private readonly ComboBox _searchBase;
     private readonly ComboBox _searchScope;
+    private readonly ComboBox _sortBox;
     private readonly TextBox _searchBox;
     private readonly ListView _resultsList;
     private readonly ListView _historyList;
     private readonly SearchHistory _history = new();
+    private IReadOnlyList<RecordSummary> _currentResults = Array.Empty<RecordSummary>();
 
     private readonly Label _recordHeader;
     private readonly DataGridView _viewer;
@@ -47,7 +49,23 @@ public sealed class MainForm : Form
         ("Title", SearchScope.Title),
         ("Author", SearchScope.Author),
         ("Subjects", SearchScope.Subjects),
+        ("Notes", SearchScope.Notes),
+        ("Call No.", SearchScope.CallNumber),
         ("Control No.", SearchScope.ControlNumber),
+    };
+
+    /// <summary>How the result set is ordered. Relevance keeps the FTS rank order
+    /// (a keyword search's best-match-first); the rest are deterministic sorts the
+    /// cataloguer chooses, ILS-style. Default is Control No. — predictable, always
+    /// defined, and the same order as List All.</summary>
+    private enum ResultSort { ControlNumber, Title, Author, Relevance }
+
+    private static readonly (string Label, ResultSort Sort)[] Sorts =
+    {
+        ("Sort: Control No.", ResultSort.ControlNumber),
+        ("Sort: Title", ResultSort.Title),
+        ("Sort: Author", ResultSort.Author),
+        ("Sort: Relevance", ResultSort.Relevance),
     };
 
     private readonly CommandRegistry _commands = new();
@@ -246,6 +264,12 @@ public sealed class MainForm : Form
         foreach (var (label, _) in Scopes) _searchScope.Items.Add(label);
         _searchScope.SelectedIndex = 0;
 
+        _sortBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 130 };
+        foreach (var (label, _) in Sorts) _sortBox.Items.Add(label);
+        _sortBox.SelectedIndex = 0;   // deterministic default: Control No.
+        // Changing the sort re-orders the current results in place, no re-query.
+        _sortBox.SelectedIndexChanged += (_, _) => RenderResults();
+
         _searchBox = new TextBox { Anchor = AnchorStyles.Left | AnchorStyles.Right };
         _searchBox.KeyDown += (_, e) =>
         {
@@ -263,9 +287,10 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Top,
             Height = 32,
-            ColumnCount = 5,
+            ColumnCount = 6,
             Padding = new Padding(2),
         };
+        searchForm.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         searchForm.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         searchForm.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         searchForm.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
@@ -273,9 +298,10 @@ public sealed class MainForm : Form
         searchForm.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         searchForm.Controls.Add(_searchBase, 0, 0);
         searchForm.Controls.Add(_searchScope, 1, 0);
-        searchForm.Controls.Add(_searchBox, 2, 0);
-        searchForm.Controls.Add(searchButton, 3, 0);
-        searchForm.Controls.Add(listAllButton, 4, 0);
+        searchForm.Controls.Add(_sortBox, 2, 0);
+        searchForm.Controls.Add(_searchBox, 3, 0);
+        searchForm.Controls.Add(searchButton, 4, 0);
+        searchForm.Controls.Add(listAllButton, 5, 0);
 
         _resultsList = new ListView
         {
@@ -758,6 +784,7 @@ public sealed class MainForm : Form
         // screen belonged to the old one.
         _openList.Items.Clear();
         _resultsList.Items.Clear();
+        _currentResults = Array.Empty<RecordSummary>();
         _historyList.Items.Clear();
         ClearViewer();
         ShowSearchView();
@@ -792,19 +819,45 @@ public sealed class MainForm : Form
         _history.Add(new SearchHistoryEntry(query, scope, CurrentBase, ids.Count));
         RefreshHistoryList();
 
+        // ids arrive in FTS relevance order; keep that as the base order so the
+        // Relevance sort can reproduce it. Other sorts reorder in RenderResults.
         var byId = _repo.List(CurrentBase).ToDictionary(s => s.Id);
-        FillResults(ids.Select(id => byId.GetValueOrDefault(id)).Where(s => s != null)!);
+        _currentResults = ids.Select(id => byId.GetValueOrDefault(id)).Where(s => s != null).Cast<RecordSummary>().ToList();
+        RenderResults();
         SetMessage($"{ids.Count} hit(s) for \"{query}\" in {CurrentBase}.");
     }
 
-    /// <summary>The explicit whole-base listing (control-number order).</summary>
+    /// <summary>The explicit whole-base listing. Feeds the same sort dropdown; its
+    /// natural order is control-number, which is also the default sort.</summary>
     private void ListAll()
     {
         if (!RequireCatalogue()) return;
-        var list = _repo.List(CurrentBase);
-        FillResults(list);
-        SetMessage($"{CurrentBase}: {list.Count} record(s).");
+        _currentResults = _repo.List(CurrentBase);
+        RenderResults();
+        SetMessage($"{CurrentBase}: {_currentResults.Count} record(s).");
     }
+
+    /// <summary>Orders <see cref="_currentResults"/> by the chosen sort and fills the
+    /// list. Relevance keeps the incoming (FTS rank) order; the deterministic sorts
+    /// are stable, so ties keep that same underlying order.</summary>
+    private void RenderResults()
+    {
+        var sort = Sorts[_sortBox.SelectedIndex].Sort;
+        IEnumerable<RecordSummary> ordered = sort switch
+        {
+            ResultSort.Title => _currentResults.OrderBy(s => s.Title, StringComparer.CurrentCultureIgnoreCase),
+            ResultSort.Author => _currentResults.OrderBy(s => s.Author, StringComparer.CurrentCultureIgnoreCase),
+            ResultSort.ControlNumber => _currentResults.OrderBy(s => ControlNumberKey(s.ControlNumber)),
+            _ => _currentResults,   // Relevance: as-is
+        };
+        FillResults(ordered);
+    }
+
+    /// <summary>Sort key for a 001: numeric when it is a plain integer (so 2 &lt; 10),
+    /// otherwise a large sentinel so odd/blank values fall to the end in a stable
+    /// way. Ties among those keep the underlying order.</summary>
+    private static long ControlNumberKey(string? controlNumber) =>
+        long.TryParse(controlNumber, out long n) ? n : long.MaxValue;
 
     private void FillResults(IEnumerable<RecordSummary> summaries)
     {

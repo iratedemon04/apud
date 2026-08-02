@@ -133,10 +133,34 @@ public class FtsSearchTests : IDisposable
     }
 
     [Fact]
+    public void Call_number_and_notes_are_their_own_scopes()
+    {
+        // 090 = local call number (050–099 block); 500 = general note (5XX).
+        var rec = InsertPushed(
+            "=LDR  00000nam a2200000 i 4500\n=001  7\n" +
+            "=090  \\\\$aQC793 .M67 2020\n" +
+            "=245  10$aFisica de particulas\n" +
+            "=500  \\\\$aIncludes bibliographical references and index.\n");
+
+        // Call Number scope matches the class mark; Notes/Title do not.
+        Assert.Contains(rec.Id, Repo.Search("BIB", "QC793", SearchScope.CallNumber));
+        Assert.Contains(rec.Id, Repo.Search("BIB", "QC793", SearchScope.All));   // still in anytext
+        Assert.Empty(Repo.Search("BIB", "QC793", SearchScope.Title));
+        Assert.Empty(Repo.Search("BIB", "QC793", SearchScope.Notes));
+
+        // Notes scope matches the 500 text; Title/CallNumber do not.
+        Assert.Contains(rec.Id, Repo.Search("BIB", "bibliographical", SearchScope.Notes));
+        Assert.Empty(Repo.Search("BIB", "bibliographical", SearchScope.Title));
+        Assert.Empty(Repo.Search("BIB", "bibliographical", SearchScope.CallNumber));
+    }
+
+    [Fact]
     public void Match_expression_wraps_scoped_terms_in_a_column_filter()
     {
         Assert.Equal("\"fisica\"* \"nuclear\"*", RecordRepository.BuildMatchExpression("fisica nuclear"));
         Assert.Equal("title : (\"fisica\"*)", RecordRepository.BuildMatchExpression("fisica", SearchScope.Title));
+        Assert.Equal("notes : (\"index\"*)", RecordRepository.BuildMatchExpression("index", SearchScope.Notes));
+        Assert.Equal("callnumber : (\"qc793\"*)", RecordRepository.BuildMatchExpression("qc793", SearchScope.CallNumber));
         Assert.Equal("", RecordRepository.BuildMatchExpression("   ", SearchScope.Title));
     }
 

@@ -20,8 +20,8 @@ internal static class FtsIndexer
         using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = """
-            INSERT INTO record_fts (rowid, control_number, title, author, subjects, anytext)
-            VALUES ($id, $cn, $title, $author, $subjects, $anytext);
+            INSERT INTO record_fts (rowid, control_number, title, author, subjects, notes, callnumber, anytext)
+            VALUES ($id, $cn, $title, $author, $subjects, $notes, $callnumber, $anytext);
             """;
         AddRowParameters(cmd, recordId, row);
         cmd.ExecuteNonQuery();
@@ -34,8 +34,8 @@ internal static class FtsIndexer
         using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = """
-            INSERT INTO record_fts (record_fts, rowid, control_number, title, author, subjects, anytext)
-            VALUES ('delete', $id, $cn, $title, $author, $subjects, $anytext);
+            INSERT INTO record_fts (record_fts, rowid, control_number, title, author, subjects, notes, callnumber, anytext)
+            VALUES ('delete', $id, $cn, $title, $author, $subjects, $notes, $callnumber, $anytext);
             """;
         AddRowParameters(cmd, recordId, row);
         cmd.ExecuteNonQuery();
@@ -62,7 +62,17 @@ internal static class FtsIndexer
             Add(conn, null, id);
     }
 
-    private readonly record struct FtsRow(string ControlNumber, string Title, string Author, string Subjects, string Anytext);
+    private readonly record struct FtsRow(
+        string ControlNumber, string Title, string Author, string Subjects,
+        string Notes, string CallNumber, string Anytext);
+
+    /// <summary>Classification / call-number fields: the 050–099 block (LC 050/090,
+    /// Dewey 082/092, UDC 080, other 084, local 099, …) plus the 852 holdings
+    /// shelving location. Its text also lives in anytext, so All-fields search still
+    /// finds it; this just backs the Call Number scope.</summary>
+    private static bool IsCallNumberTag(string tag) =>
+        (string.CompareOrdinal(tag, "050") >= 0 && string.CompareOrdinal(tag, "099") <= 0)
+        || tag == "852";
 
     private static FtsRow BuildRow(SqliteConnection conn, SqliteTransaction? tx, long recordId)
     {
@@ -78,6 +88,8 @@ internal static class FtsIndexer
         var title = new List<string>();
         var author = new List<string>();
         var subjects = new List<string>();
+        var notes = new List<string>();
+        var callnumber = new List<string>();
         var anytext = new List<string>();
 
         using (var cmd = conn.CreateCommand())
@@ -98,12 +110,14 @@ internal static class FtsIndexer
                 if (tag == "245") title.Add(text);
                 else if (tag[0] is '1' or '7') author.Add(text);
                 else if (tag[0] == '6') subjects.Add(text);
+                else if (tag[0] == '5') notes.Add(text);
+                if (IsCallNumberTag(tag)) callnumber.Add(text);
             }
         }
 
         return new FtsRow(cn,
-            string.Join(" ", title), string.Join(" ", author),
-            string.Join(" ", subjects), string.Join(" ", anytext));
+            string.Join(" ", title), string.Join(" ", author), string.Join(" ", subjects),
+            string.Join(" ", notes), string.Join(" ", callnumber), string.Join(" ", anytext));
     }
 
     /// <summary>Packed field content → plain text: subfield codes dropped, values joined.</summary>
@@ -120,6 +134,8 @@ internal static class FtsIndexer
         cmd.Parameters.AddWithValue("$title", row.Title);
         cmd.Parameters.AddWithValue("$author", row.Author);
         cmd.Parameters.AddWithValue("$subjects", row.Subjects);
+        cmd.Parameters.AddWithValue("$notes", row.Notes);
+        cmd.Parameters.AddWithValue("$callnumber", row.CallNumber);
         cmd.Parameters.AddWithValue("$anytext", row.Anytext);
     }
 }

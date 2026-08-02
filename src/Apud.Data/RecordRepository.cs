@@ -324,6 +324,8 @@ public sealed class RecordRepository
             SearchScope.Title => "title",
             SearchScope.Author => "author",
             SearchScope.Subjects => "subjects",
+            SearchScope.Notes => "notes",
+            SearchScope.CallNumber => "callnumber",
             _ => "control_number",
         };
         return $"{column} : ({terms})";

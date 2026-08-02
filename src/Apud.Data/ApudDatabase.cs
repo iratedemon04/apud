@@ -14,7 +14,7 @@ namespace Apud.Data;
 /// </summary>
 public sealed class ApudDatabase : IDisposable
 {
-    public const int SchemaVersion = 3;
+    public const int SchemaVersion = 4;
 
     public SqliteConnection Connection { get; }
 
@@ -48,8 +48,37 @@ public sealed class ApudDatabase : IDisposable
         if (version == 0) { CreateSchemaV1(); version = 1; }
         if (version == 1) { UpgradeV1ToV2(); version = 2; }
         if (version == 2) { UpgradeV2ToV3(); version = 3; }
+        if (version == 3) { UpgradeV3ToV4(); version = 4; }
 
         Execute($"PRAGMA user_version = {SchemaVersion};");
+    }
+
+    /// <summary>
+    /// record_fts is a contentless, fully rebuildable index — not user data — so
+    /// every place that (re)creates it uses this ONE current definition. Keeping a
+    /// single definition guarantees a reindex during any migration matches
+    /// <see cref="FtsIndexer"/>'s column set (the v3→v4 columns were once missed by
+    /// the older v1→v2 DDL, which broke reindexing a populated v1 catalogue).
+    /// </summary>
+    private const string CreateFtsTableSql = """
+        CREATE VIRTUAL TABLE record_fts USING fts5(
+          control_number, title, author, subjects, notes, callnumber, anytext,
+          content='',
+          tokenize='unicode61 remove_diacritics 2'
+        );
+        """;
+
+    /// <summary>
+    /// v4: record_fts gains <c>notes</c> (5XX) and <c>callnumber</c> (050–099, 852)
+    /// columns so those become searchable scopes. A contentless FTS table can't be
+    /// altered, so it is dropped, recreated with the new columns, and repopulated
+    /// from the pushed records — a catalogue from an earlier Apud gains the new
+    /// scopes on first open with no re-import.
+    /// </summary>
+    private void UpgradeV3ToV4()
+    {
+        Execute("DROP TABLE record_fts;\n" + CreateFtsTableSql);
+        FtsIndexer.Rebuild(Connection);
     }
 
     /// <summary>
@@ -68,14 +97,10 @@ public sealed class ApudDatabase : IDisposable
     /// </summary>
     private void UpgradeV1ToV2()
     {
-        Execute("""
-            DROP TABLE record_fts;
-            CREATE VIRTUAL TABLE record_fts USING fts5(
-              control_number, title, author, subjects, anytext,
-              content='',
-              tokenize='unicode61 remove_diacritics 2'
-            );
-            """);
+        // Rebuilds to the CURRENT FTS shape (see CreateFtsTableSql): the index is
+        // derived data, and using one definition keeps the reindex below in step
+        // with FtsIndexer regardless of which columns later versions added.
+        Execute("DROP TABLE record_fts;\n" + CreateFtsTableSql);
         FtsIndexer.Rebuild(Connection);
     }
 

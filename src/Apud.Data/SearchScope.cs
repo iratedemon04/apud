@@ -10,5 +10,7 @@ public enum SearchScope
     Title,
     Author,
     Subjects,
+    Notes,
+    CallNumber,
     ControlNumber,
 }
