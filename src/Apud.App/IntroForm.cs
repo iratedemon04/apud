@@ -19,12 +19,12 @@ public sealed class IntroForm : Form
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
         MaximizeBox = false;
-        ClientSize = new Size(440, 220);
+        ClientSize = new Size(440, 190);
 
         var body = new Label
         {
             Dock = DockStyle.Top,
-            Height = 168,
+            Height = 138,
             Padding = new Padding(18, 16, 18, 0),
             Font = new Font("Segoe UI", 9.75f),
             Text =
@@ -32,8 +32,7 @@ public sealed class IntroForm : Form
                 "2.  Import records — File → Import Records, then pick a single\n" +
                 "      file or a whole folder of .mrk files.\n\n" +
                 "3.  Search it — type in the search box, choose a scope, press\n" +
-                "      Enter. Double-click a result to open it.\n\n" +
-                "Reopen this any time from Help → Getting Started.",
+                "      Enter. Double-click a result to open it.",
         };
 
         var close = new Button
@@ -41,7 +40,7 @@ public sealed class IntroForm : Form
             Text = "Close",
             DialogResult = DialogResult.OK,
             Size = new Size(90, 30),
-            Location = new Point(334, 178),
+            Location = new Point(334, 148),
             Anchor = AnchorStyles.Right | AnchorStyles.Bottom,
         };
 
