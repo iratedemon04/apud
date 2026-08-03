@@ -436,6 +436,20 @@ public sealed class RecordRepository
         return new BrowseResult(entries, backward.Count);
     }
 
+    /// <summary>The authorized (1XX) display string of one authority record, read
+    /// straight from the browse index. Lets the Ctrl+F4 list render a see-reference's
+    /// "→ see: authorized form" target even when the authorized heading sorts far from
+    /// the variant and so is not in the same positioned window. Null if the record has
+    /// no indexed authorized heading.</summary>
+    public string? AuthorizedDisplayFor(long authRecordId)
+    {
+        using var cmd = _db.Connection.CreateCommand();
+        cmd.CommandText =
+            "SELECT display FROM heading_index WHERE auth_record_id = $id AND kind = 'auth' LIMIT 1;";
+        cmd.Parameters.AddWithValue("$id", authRecordId);
+        return cmd.ExecuteScalar() as string;
+    }
+
     private List<BrowseHeading> ReadHeadings(string whereOrder, string start, int limit)
     {
         var list = new List<BrowseHeading>();

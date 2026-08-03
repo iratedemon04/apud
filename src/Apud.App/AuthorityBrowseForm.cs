@@ -19,6 +19,7 @@ namespace Apud.App;
 public sealed class AuthorityBrowseForm : Form
 {
     private readonly Func<string, BrowseResult> _reposition;
+    private readonly Func<long, string?> _authorizedDisplay;
     private readonly TextBox _positionBox;
     private readonly ListView _list;
 
@@ -28,9 +29,11 @@ public sealed class AuthorityBrowseForm : Form
     /// <summary>The chosen line's display text (for the confirmation message).</summary>
     public string? SelectedDisplay { get; private set; }
 
-    public AuthorityBrowseForm(string fieldText, BrowseResult initial, Func<string, BrowseResult> reposition)
+    public AuthorityBrowseForm(string fieldText, BrowseResult initial,
+        Func<string, BrowseResult> reposition, Func<long, string?> authorizedDisplay)
     {
         _reposition = reposition;
+        _authorizedDisplay = authorizedDisplay;
 
         Text = "Browse Authority Headings — Ctrl+F4";
         FormBorderStyle = FormBorderStyle.Sizable;
@@ -118,7 +121,15 @@ public sealed class AuthorityBrowseForm : Form
                 HeadingKind.SeeAlso => "see also",
                 _ => "",
             };
-            string text = e.Kind == HeadingKind.See && authorized.TryGetValue(e.AuthRecordId, out var target)
+            // A see-reference shows its authorized target: prefer the copy already in
+            // this window, else look it up (the authorized form usually sorts far from
+            // the variant and so is out of view). Only if the record has no indexed
+            // authorized heading at all does the bare variant show.
+            string? target = null;
+            if (e.Kind == HeadingKind.See &&
+                !authorized.TryGetValue(e.AuthRecordId, out target))
+                target = _authorizedDisplay(e.AuthRecordId);
+            string text = target is { Length: > 0 }
                 ? $"{e.Display}   →  see: {target}"
                 : e.Display;
 

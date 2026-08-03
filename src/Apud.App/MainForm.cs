@@ -1791,7 +1791,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        using var form = new AuthorityBrowseForm(fieldText, initial, Position);
+        using var form = new AuthorityBrowseForm(fieldText, initial, Position, _repo.AuthorizedDisplayFor);
         if (form.ShowDialog(this) != DialogResult.OK || form.SelectedAuthRecordId is not long authId) return;
 
         var auth = _repo.Load(authId);

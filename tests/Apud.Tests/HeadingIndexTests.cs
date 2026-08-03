@@ -92,6 +92,23 @@ public class HeadingIndexTests : IDisposable
         Assert.Equal("Física", browse.Entries[browse.Position].Display);
     }
 
+    [Fact]
+    public void Authorized_display_resolves_from_any_of_a_records_headings()
+    {
+        // The variant sorts far from its authorized form; the browse list still needs
+        // the authorized target for the "→ see:" annotation, by record id not by window.
+        var aut = InsertPushed(Auth("1", "México--Historia", see: "Historia de México"), "AUT");
+
+        Assert.Equal("México--Historia", Repo.AuthorizedDisplayFor(aut.Id));
+    }
+
+    [Fact]
+    public void Authorized_display_is_null_when_the_record_has_no_authorized_heading()
+    {
+        // No pushed authority at all → nothing to resolve.
+        Assert.Null(Repo.AuthorizedDisplayFor(9999));
+    }
+
     // ---------- ripple ----------
 
     [Fact]
