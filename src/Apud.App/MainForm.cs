@@ -1814,11 +1814,25 @@ public sealed class MainForm : Form
     /// <summary>Ctrl+W: run the whole pipeline as a dry run — nothing is written.
     /// Errors and warnings both show in the findings list; a clean record just
     /// says so.</summary>
+    /// <summary>Strips contentless fields from the record (task 17) and, if any
+    /// went, redraws the grid and sidebar so the cleanup is visible before the
+    /// findings are shown. The removal rides the undo stack (Ctrl+Z brings them
+    /// back).</summary>
+    private void StripEmptyFieldsAndRefresh(EditorDocument doc)
+    {
+        if (doc.StripEmptyFields() > 0)
+        {
+            RenderRecord(preservePosition: false);
+            UpdateSidebarItem(doc);
+        }
+    }
+
     private void ValidateRecord()
     {
         if (!RequireCatalogue()) return;
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
         _viewer.EndEdit();
+        StripEmptyFieldsAndRefresh(_currentDoc); // validate removes contentless fields (task 17)
 
         // A brief, visible beat so the cataloguer sees that validation ran — a
         // clean record's result is otherwise a single unchanged line and reads as
@@ -1860,6 +1874,8 @@ public sealed class MainForm : Form
             SetMessage($"{doc.Record.ControlNumber} is already pushed and unchanged.");
             return;
         }
+
+        StripEmptyFieldsAndRefresh(doc); // validate removes contentless fields before pushing (task 17)
 
         var profile = ValidationProfileConfig.For(doc.Stored.Base);
 

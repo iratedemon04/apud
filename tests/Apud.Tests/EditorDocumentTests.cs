@@ -446,6 +446,53 @@ public class EditorDocumentTests
         Assert.False(doc.OrderFields());
     }
 
+    // ---------- strip empty fields (validate, task 17) ----------
+
+    [Fact]
+    public void StripEmptyFields_removes_contentless_fields_regardless_of_indicators_or_code()
+    {
+        var doc = Doc();
+        // A blank data field with indicators + a codeful-but-valueless subfield: no
+        // content, so it must go despite carrying indicators and a code.
+        int at = doc.InsertBlankFieldAfter(doc.Record.Fields.Count - 1);
+        doc.SetTag(at, "999");
+        doc.SetIndicators(at, "12");
+        doc.SetSubfieldCode(at, 0, "z"); // ‡z but empty value
+
+        int removed = doc.StripEmptyFields();
+
+        Assert.Equal(1, removed);
+        Assert.DoesNotContain(doc.Record.Fields, f => f.Tag == "999");
+        // The real fields survive.
+        Assert.Equal(new[] { "001", "008", "100", "245", "650" },
+            doc.Record.Fields.Select(f => f.Tag).ToArray());
+    }
+
+    [Fact]
+    public void StripEmptyFields_keeps_fields_that_have_any_content()
+    {
+        var doc = Doc();
+        int before = doc.Record.Fields.Count;
+        Assert.Equal(0, doc.StripEmptyFields()); // the monograph has no empty fields
+        Assert.Equal(before, doc.Record.Fields.Count);
+    }
+
+    [Fact]
+    public void StripEmptyFields_is_a_single_undo_step()
+    {
+        var doc = Doc();
+        int a = doc.InsertBlankFieldAfter(4);
+        doc.SetTag(a, "888"); // empty
+        int b = doc.InsertBlankFieldAfter(doc.Record.Fields.Count - 1);
+        doc.SetTag(b, "777"); // empty
+        doc.MarkSaved();
+
+        Assert.Equal(2, doc.StripEmptyFields());
+        doc.Undo();
+        Assert.Contains(doc.Record.Fields, f => f.Tag == "888");
+        Assert.Contains(doc.Record.Fields, f => f.Tag == "777");
+    }
+
     // ---------- the templates we ship ----------
 
     [Theory]

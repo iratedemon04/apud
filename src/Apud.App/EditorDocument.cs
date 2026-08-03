@@ -173,6 +173,23 @@ public sealed class EditorDocument
         Apply(() => Record.Fields.RemoveAt(fieldIndex));
 
     /// <summary>
+    /// Removes every field with no content — a data field whose subfields are all
+    /// empty (whatever their codes or indicators) or that has no subfields at all,
+    /// and a control field with no data. The leader is never a field, so it stays.
+    /// Run at validate/push so a stray blank field neither blocks the push nor
+    /// ships (user, task 17). Undoable in one step; returns how many were removed.
+    /// </summary>
+    public int StripEmptyFields()
+    {
+        var doomed = new List<int>();
+        for (int i = 0; i < Record.Fields.Count; i++)
+            if (!HasContent(Record.Fields[i])) doomed.Add(i);
+        if (doomed.Count == 0) return 0;
+        Apply(() => { for (int k = doomed.Count - 1; k >= 0; k--) Record.Fields.RemoveAt(doomed[k]); });
+        return doomed.Count;
+    }
+
+    /// <summary>
     /// Enter (in the editor) orders the fields: a STABLE sort by tag, so repeated
     /// tags (three 650s, two 500s) keep exactly the order the cataloguer wrote
     /// them — subject order is real information. The same ordering Ctrl+L applies

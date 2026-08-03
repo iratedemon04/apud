@@ -113,6 +113,14 @@ public sealed class FixedFieldForm : Form
         AcceptButton = ok;
         CancelButton = cancel;
 
+        // Grow the window to fit every position, so none is stranded below the fold
+        // and forcing a scroll (task 6). Capped to the screen; AutoScroll still
+        // covers the rare layout taller than that.
+        var preferred = grid.GetPreferredSize(new Size(ClientSize.Width, 0));
+        int wanted = preferred.Height + buttons.Height;
+        int cap = (int)(Screen.PrimaryScreen!.WorkingArea.Height * 0.85);
+        ClientSize = new Size(ClientSize.Width, Math.Clamp(wanted, MinimumSize.Height, cap));
+
         // Land the cursor on the first editable position.
         ActiveControl = _boxes.FirstOrDefault(b => !b.Pos.Protected).Box;
     }
