@@ -30,7 +30,7 @@ public sealed class MainForm : Form
     private readonly Panel _searchView;
     private readonly Panel _recordView;
 
-    private readonly ComboBox _searchBase;
+    private readonly Label _searchBaseLabel; // read-only "which base" tag in the search bar (was a redundant dropdown)
     private readonly ComboBox _searchScope;
     private readonly ComboBox _sortBox;
     private readonly TextBox _searchBox;
@@ -105,15 +105,16 @@ public sealed class MainForm : Form
     private ApudDatabase? _db;
     private RecordRepository? _repo;
     private string? _catalogPath;          // the open .db path; MARC_OUT sits beside it
-    private bool _syncingBase;
+    private string _currentBase = "BIB"; // the single source of truth for the active base (menu + Ctrl+B drive it)
     private EditorDocument? _currentDoc; // the record showing in the editor
     private bool _rendering;             // grid is being rebuilt; ignore its edit events
     private bool _resumeEditAfterRender; // a structural edit re-rendered mid-typing; drop back into the cell
+    private string? _editCol;            // column name of the cell currently being edited (for PrimeEditingBox)
     private MarcField? _fieldClipboard;      // Ctrl+T copy field / Alt+T paste
     private MarcSubfield? _subfieldClipboard; // Ctrl+S copy subfield / Alt+S paste
     private int _pushesSinceSync;            // records pushed since the last server backup
 
-    private string CurrentBase => _searchBase.SelectedIndex == 1 ? "AUT" : "BIB";
+    private string CurrentBase => _currentBase;
 
     private CommandContext ActiveContext =>
         _recordView.Visible ? CommandContext.Editor : CommandContext.Search;
@@ -143,6 +144,7 @@ public sealed class MainForm : Form
         _commands.Add(new Command { Id = "app.exit", Name = "E&xit", DefaultKey = "Alt+F4", Execute = Close });
         _commands.Add(new Command { Id = "base.bib", Name = "&BIB — Bibliographic", Execute = () => SetBase("BIB") });
         _commands.Add(new Command { Id = "base.aut", Name = "&AUT — Authority", Execute = () => SetBase("AUT") });
+        _commands.Add(new Command { Id = "base.toggle", Name = "&Switch Base (BIB ⇄ AUT)", DefaultKey = "Ctrl+B", Execute = () => SetBase(CurrentBase == "BIB" ? "AUT" : "BIB") });
         _commands.Add(new Command { Id = "search.focus", Name = "&Search", DefaultKey = "F2", Execute = ShowSearchView });
         _commands.Add(new Command { Id = "help.field", Name = "&Field Help", DefaultKey = "F1", Execute = ShowFieldHelp });
         _commands.Add(new Command { Id = "help.intro", Name = "&Getting Started", Execute = ShowIntro });
@@ -155,6 +157,7 @@ public sealed class MainForm : Form
         _commands.Add(new Command { Id = "record.undo", Name = "&Undo", Context = CommandContext.Editor, DefaultKey = "Ctrl+Z", Execute = UndoEdit });
         _commands.Add(new Command { Id = "record.redo", Name = "&Redo", Context = CommandContext.Editor, DefaultKey = "Ctrl+Y", Execute = RedoEdit });
         _commands.Add(new Command { Id = "field.edit", Name = "&Edit Field (cursor)", Context = CommandContext.Editor, DefaultKey = "Insert", Execute = BeginEditCurrentCell });
+        _commands.Add(new Command { Id = "field.order", Name = "&Order Fields", Context = CommandContext.Editor, DefaultKey = "Enter", Execute = OrderFieldsCommand });
         _commands.Add(new Command { Id = "field.new", Name = "New &Field", Context = CommandContext.Editor, DefaultKey = "F6", Execute = NewField });
         _commands.Add(new Command { Id = "subfield.new", Name = "New Su&bfield", Context = CommandContext.Editor, DefaultKey = "F7", Execute = NewSubfield });
         _commands.Add(new Command { Id = "field.delete", Name = "&Delete Field", Context = CommandContext.Editor, DefaultKey = "Ctrl+F5", Execute = DeleteCurrentField });
@@ -201,6 +204,8 @@ public sealed class MainForm : Form
         _autItem = MenuItem("base.aut");
         @base.DropDownItems.Add(_bibItem);
         @base.DropDownItems.Add(_autItem);
+        @base.DropDownItems.Add(new ToolStripSeparator());
+        @base.DropDownItems.Add(MenuItem("base.toggle"));
 
         var record = new ToolStripMenuItem("&Record");
         record.DropDownItems.Add(MenuItem("record.new"));
@@ -287,11 +292,17 @@ public sealed class MainForm : Form
         switchStrip.Controls.Add(_recordViewButton);
 
         // ----- search view -----
-        _searchBase = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 70 };
-        _searchBase.Items.Add("BIB");
-        _searchBase.Items.Add("AUT");
-        _searchBase.SelectedIndex = 0;
-        _searchBase.SelectedIndexChanged += (_, _) => SetBase(CurrentBase);
+        // The base is chosen from the Base menu (or Ctrl+B) — one control, not two.
+        // Here we only SHOW which base is active, so the search bar isn't ambiguous.
+        _searchBaseLabel = new Label
+        {
+            AutoSize = false,
+            Width = 46,
+            TextAlign = ContentAlignment.MiddleCenter,
+            Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+            Anchor = AnchorStyles.Left,
+            Text = _currentBase,
+        };
 
         _searchScope = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150 };
         PopulateScopes(CurrentBase);
@@ -328,7 +339,7 @@ public sealed class MainForm : Form
         searchForm.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         searchForm.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         searchForm.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        searchForm.Controls.Add(_searchBase, 0, 0);
+        searchForm.Controls.Add(_searchBaseLabel, 0, 0);
         searchForm.Controls.Add(_searchScope, 1, 0);
         searchForm.Controls.Add(_sortBox, 2, 0);
         searchForm.Controls.Add(_searchBox, 3, 0);
@@ -690,7 +701,21 @@ public sealed class MainForm : Form
     /// the normal WinForms path.</summary>
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
-        if (ShouldDispatch(keyData) && _keymap.Lookup(keyData, ActiveContext) is string id)
+        var ctx = ActiveContext;
+        // A binding that resolves to field.order (Enter by default) fires even
+        // while a grid cell is being typed in — the typing guard would otherwise
+        // swallow it. This overrides the grid's default "commit and drop to the
+        // row below": Enter orders the fields and keeps the cursor on the field
+        // you were on (tasks 8, 17). Gated to the record grid so Enter in the
+        // findings list / search box is untouched.
+        if (ctx == CommandContext.Editor && _currentDoc is not null
+            && (_viewer.Focused || _viewer.IsCurrentCellInEditMode)
+            && _keymap.Lookup(keyData, ctx) == "field.order")
+        {
+            OrderFieldsCommand();
+            return true;
+        }
+        if (ShouldDispatch(keyData) && _keymap.Lookup(keyData, ctx) is string id)
         {
             _commands.Find(id)!.Execute();
             return true;
@@ -863,12 +888,10 @@ public sealed class MainForm : Form
 
     private void SetBase(string @base)
     {
-        if (_syncingBase) return;
-        _syncingBase = true;
+        _currentBase = @base;
         _bibItem.Checked = @base == "BIB";
         _autItem.Checked = @base == "AUT";
-        _searchBase.SelectedIndex = @base == "AUT" ? 1 : 0;
-        _syncingBase = false;
+        _searchBaseLabel.Text = @base;
         PopulateScopes(@base);
         _listAllMode = false; // a paged listing belongs to the base it was started on
         UpdateMoreButton();
@@ -1289,21 +1312,45 @@ public sealed class MainForm : Form
             _ => 0, // 0 = unlimited (value and control-data cells)
         };
 
-        // The three fixed micro-cells (tag 3, indicators 2, code 1) open with
-        // their content SELECTED, so the first keystroke replaces it — otherwise a
-        // brand-new field's placeholder ("   " / "__") already fills the cell to
-        // its max length and the cataloguer must delete those "bars" before typing
-        // (user report 2026-08-01). The larger value/control cells keep the
-        // text-editor feel: a caret at the end, nothing selected.
-        bool micro = col is "tag" or "ind" or "code";
-        BeginInvoke(() =>
-        {
-            if (tb.IsDisposed || !tb.IsHandleCreated) return;
-            if (micro) { tb.SelectAll(); return; }
-            tb.SelectionStart = tb.Text.Length;
-            tb.SelectionLength = 0;
-        });
+        // Prime the editing box the instant the grid populates its text — which
+        // happens SYNCHRONOUSLY inside BeginEdit, before any user keystroke can
+        // reach the control. This is what makes it race-free: the old code
+        // deferred a SelectAll with BeginInvoke, so a fast first keystroke into a
+        // brand-new tag/indicators/code was clobbered by the late SelectAll —
+        // "you type the first digit and it gets deleted" (user report, tasks
+        // 11-13). PrimeEditingBox is a single persistent handler (re-subscribed
+        // once per edit), so the reused editing control never accumulates
+        // stale handlers.
+        _editCol = col;
+        tb.TextChanged -= PrimeEditingBox;
+        tb.TextChanged += PrimeEditingBox;
     }
+
+    /// <summary>Fired the moment the grid sets the editing box's text. Clears a
+    /// brand-new field's invisible placeholder (which otherwise fills a
+    /// fixed-width micro-cell to its max length and eats the first keystroke) and
+    /// drops the caret at the end with nothing selected — the record reads and
+    /// types like a plain text editor.</summary>
+    private void PrimeEditingBox(object? sender, EventArgs e)
+    {
+        if (sender is not TextBox tb) return;
+        tb.TextChanged -= PrimeEditingBox; // one-shot; setting Text below won't re-enter
+        string col = _editCol ?? "";
+        bool micro = col is "tag" or "ind" or "code";
+        if (micro && IsPlaceholderCell(col, tb.Text)) tb.Text = "";
+        tb.SelectionStart = tb.Text.Length;
+        tb.SelectionLength = 0;
+    }
+
+    /// <summary>A micro-cell holding only its blank placeholder: an unwritten tag
+    /// ("   " / ""), a codeless subfield (""), or blank indicators ("__").</summary>
+    private static bool IsPlaceholderCell(string column, string text) => column switch
+    {
+        "tag" => text.Trim().Length == 0,
+        "code" => text.Length == 0,
+        "ind" => text.Replace("_", "").Trim().Length == 0,
+        _ => false,
+    };
 
     private static string Caret(string s) => s.Replace(' ', '^');
 
@@ -1376,6 +1423,34 @@ public sealed class MainForm : Form
         if (cell.ReadOnly) { SetMessage("Nothing to type here — move to the tag, indicators, code or value."); return; }
         _viewer.Focus();
         _viewer.BeginEdit(false); // false = caret, not select-all (EditingControlShowing puts it at the end)
+    }
+
+    /// <summary>Enter: order the fields (stable sort by tag) and keep the cursor
+    /// on the field you were on — it follows to its new position instead of the
+    /// grid dropping you onto the row below (tasks 8, 17). Undoable in one step.</summary>
+    private void OrderFieldsCommand()
+    {
+        if (_currentDoc is null) { SetMessage("No record on screen."); return; }
+        _viewer.EndEdit();               // commit the cell first (a just-typed tag counts)
+        _resumeEditAfterRender = false;  // don't let a structural commit re-open the box under us
+
+        // Remember the field by REFERENCE (its index changes when fields move) plus
+        // the column and subfield so the cursor lands back on the same spot.
+        string column = _viewer.CurrentCell?.OwningColumn.Name ?? "tag";
+        var cur = CurrentRef();
+        MarcField? field = cur is { FieldIndex: >= 0 } c ? _currentDoc.Record.Fields[c.FieldIndex] : null;
+        int sub = cur?.SubfieldIndex ?? -1;
+
+        bool moved = _currentDoc.OrderFields();
+        RenderRecord(preservePosition: false);
+        UpdateSidebarItem(_currentDoc);
+
+        if (field is not null)
+        {
+            int idx = _currentDoc.Record.Fields.IndexOf(field);
+            if (idx >= 0) SelectCell(idx, sub, column);
+        }
+        SetMessage(moved ? "Fields ordered." : "Fields already in order.");
     }
 
     private void NewField()
@@ -1502,7 +1577,12 @@ public sealed class MainForm : Form
         RenderRecord();
         UpdateSidebarItem(_currentDoc);
         UpdateHeader();
-        SelectCell(at, -1, "tag");
+        // Land the cursor IN the pasted field ready to edit. SelectFieldRow finds
+        // the field's first row whatever its shape — a data field's first row
+        // carries SubfieldIndex 0, so the old SelectCell(at, -1, …) matched no row
+        // and the cursor never moved onto the paste (task 10).
+        SelectFieldRow(at);
+        _viewer.BeginEdit(false);
         SetMessage($"Pasted field {_fieldClipboard.Tag}.");
     }
 

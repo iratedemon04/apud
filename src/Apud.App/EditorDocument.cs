@@ -172,6 +172,28 @@ public sealed class EditorDocument
     public void DeleteField(int fieldIndex) =>
         Apply(() => Record.Fields.RemoveAt(fieldIndex));
 
+    /// <summary>
+    /// Enter (in the editor) orders the fields: a STABLE sort by tag, so repeated
+    /// tags (three 650s, two 500s) keep exactly the order the cataloguer wrote
+    /// them — subject order is real information. The same ordering Ctrl+L applies
+    /// at push, offered here on demand (user request 2026-08-02). Undoable; the
+    /// field objects themselves are reordered in place, so a caller can follow a
+    /// field to its new position by reference. Returns true when something moved.
+    /// </summary>
+    public bool OrderFields()
+    {
+        string beforeSig = Sign();
+        var ordered = Record.Fields
+            .OrderBy(f => f.Tag, StringComparer.Ordinal) // LINQ OrderBy is a stable sort
+            .ToList();
+        Apply(() =>
+        {
+            Record.Fields.Clear();
+            Record.Fields.AddRange(ordered);
+        });
+        return Sign() != beforeSig;
+    }
+
     /// <summary>Deletes several fields in one undoable step (removed high-index
     /// first so the earlier indices stay valid). The leader (-1) is ignored.
     /// Used by "delete selected fields" when cleaning up a pasted-in record.</summary>

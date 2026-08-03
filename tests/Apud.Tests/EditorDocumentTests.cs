@@ -388,6 +388,64 @@ public class EditorDocumentTests
         Assert.Equal("Grandes proyectos", source.Fields[3].Subfields[0].Value); // 245
     }
 
+    // ---------- order fields (Enter, tasks 8/17) ----------
+
+    [Fact]
+    public void OrderFields_stable_sorts_by_tag_and_reports_movement()
+    {
+        var doc = Doc();
+        // Put a 500 after the 650 so ordering has work to do.
+        int at = doc.InsertBlankFieldAfter(4);
+        doc.SetTag(at, "500");
+
+        bool moved = doc.OrderFields();
+
+        Assert.True(moved);
+        Assert.Equal(new[] { "001", "008", "100", "245", "500", "650" },
+            doc.Record.Fields.Select(f => f.Tag).ToArray());
+    }
+
+    [Fact]
+    public void OrderFields_keeps_repeated_tags_in_written_order()
+    {
+        var doc = Doc();
+        int a = doc.InsertBlankFieldAfter(doc.Record.Fields.Count - 1);
+        doc.SetTag(a, "650");                          // retag adds one blank ‡a
+        doc.SetSubfieldValue(a, 0, "Segundo tema");
+        int b = doc.InsertBlankFieldAfter(doc.Record.Fields.Count - 1);
+        doc.SetTag(b, "650");
+        doc.SetSubfieldValue(b, 0, "Tercer tema");
+
+        doc.OrderFields();
+
+        var subjects = doc.Record.Fields.Where(f => f.Tag == "650")
+            .Select(f => f.Subfields[0].Value).ToArray();
+        Assert.Equal(new[] { "Física nuclear", "Segundo tema", "Tercer tema" }, subjects);
+    }
+
+    [Fact]
+    public void OrderFields_is_a_single_undo_step()
+    {
+        var doc = Doc();
+        int at = doc.InsertBlankFieldAfter(4);
+        doc.SetTag(at, "010");
+        doc.MarkSaved();
+
+        doc.OrderFields();
+        Assert.Equal("010", doc.Record.Fields[2].Tag); // moved up after 008
+
+        doc.Undo();
+        Assert.Equal(new[] { "001", "008", "100", "245", "650", "010" },
+            doc.Record.Fields.Select(f => f.Tag).ToArray());
+    }
+
+    [Fact]
+    public void OrderFields_reports_no_movement_when_already_sorted()
+    {
+        var doc = Doc();
+        Assert.False(doc.OrderFields());
+    }
+
     // ---------- the templates we ship ----------
 
     [Theory]
