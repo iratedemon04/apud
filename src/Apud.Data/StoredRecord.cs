@@ -32,11 +32,13 @@ public sealed class StoredRecord
 }
 
 /// <summary>One row of a record list (navigation pane, search results) — no field data loaded.
-/// Author is the 1XX heading (7XX when there is none); Year comes from 008/07-10,
-/// falling back to 260/264 $c. Either may be empty — display what's there.</summary>
+/// For BIB, Title is the 245 title proper and Author the 1XX/7XX heading. For AUT,
+/// Title carries the WHOLE 1XX heading (all subfields joined, not just $a), plus
+/// Classification (065/08X $a) and Source (first 670 $a) for the authority result
+/// columns. Year comes from 260/264 $c. Any field may be empty — display what's there.</summary>
 public sealed record RecordSummary(
     long Id, string Base, string? ControlNumber, RecordStatus Status, string Title,
-    string Author, string Year, DateTime UpdatedUtc);
+    string Author, string Year, DateTime UpdatedUtc, string Classification, string Source);
 
 /// <summary>One line of the authority browse list (Module 8): which authority
 /// record it belongs to, whether it is the authorized/see/see-also form, the tag

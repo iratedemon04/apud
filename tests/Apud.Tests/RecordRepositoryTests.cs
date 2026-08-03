@@ -151,6 +151,27 @@ public class RecordRepositoryTests : IDisposable
     }
 
     [Fact]
+    public void Authority_summary_carries_the_full_heading_classification_and_source()
+    {
+        // 150 subject with $a$x, a 082 class number, a 670 source. The heading must
+        // show ALL subfields (not just $a — task 5); Classification comes from 08X,
+        // Source from the first 670 (task 2).
+        var aut = Parse(
+            "=LDR  00000nz  a2200000n  4500\n" +
+            "=001  42\n" +
+            "=082  \\4$a539.7\n" +
+            "=150  \\\\$aFísica nuclear$xInvestigación\n" +
+            "=670  \\\\$aGran enciclopedia, 2019\n");
+        Repo.Insert(new StoredRecord("AUT", aut));
+
+        var row = Repo.List("AUT").Single();
+        Assert.Equal("42", row.ControlNumber);
+        Assert.Equal("Física nuclear--Investigación", row.Title); // whole heading, subfields joined by "--"
+        Assert.Equal("539.7", row.Classification);
+        Assert.Equal("Gran enciclopedia, 2019", row.Source);
+    }
+
+    [Fact]
     public void ListPage_and_Count_page_a_base_without_loading_it_all()
     {
         for (int cn = 1; cn <= 5; cn++)

@@ -44,7 +44,7 @@ public sealed class BackupTimeForm : Form
             Height = 56,
             Padding = new Padding(18, 16, 18, 0),
             Font = new Font("Segoe UI", 9.75f, FontStyle.Bold),
-            Text = "Warning, the first backup upload may take a while depending on the size of your catalogue.",
+            Text = "Warning: the first backup upload may take a while depending on the size of your catalogue.",
         };
 
         var table = new ListView

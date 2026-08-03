@@ -256,7 +256,8 @@ public sealed class MainForm : Form
         };
         _openList.Columns.Add("Base", 45);
         _openList.Columns.Add("001", 60);
-        _openList.Columns.Add("Title", 170);
+        _openList.Columns.Add("Title", 130);
+        _openList.Columns.Add("Status", 50);
         _openList.SelectedIndexChanged += (_, _) => ShowSelectedOpenRecord();
         _openList.KeyDown += (_, e) =>
         {
@@ -354,11 +355,7 @@ public sealed class MainForm : Form
             MultiSelect = false,
             HideSelection = false,
         };
-        _resultsList.Columns.Add("001", 70);
-        _resultsList.Columns.Add("Title", 300);
-        _resultsList.Columns.Add("Author", 180);
-        _resultsList.Columns.Add("Year", 50);
-        _resultsList.Columns.Add("Status", 60);
+        ConfigureResultColumns(_currentBase);
         _resultsList.DoubleClick += (_, _) => OpenSelectedResult();
         _resultsList.KeyDown += (_, e) =>
         {
@@ -888,11 +885,20 @@ public sealed class MainForm : Form
 
     private void SetBase(string @base)
     {
+        bool baseChanged = _currentBase != @base;
         _currentBase = @base;
         _bibItem.Checked = @base == "BIB";
         _autItem.Checked = @base == "AUT";
         _searchBaseLabel.Text = @base;
         PopulateScopes(@base);
+        // The two bases have different result columns; switching clears the now-stale
+        // hits from the other base so rows never sit under the wrong header.
+        if (baseChanged)
+        {
+            ConfigureResultColumns(@base);
+            _resultsList.Items.Clear();
+            _currentResults = Array.Empty<RecordSummary>();
+        }
         _listAllMode = false; // a paged listing belongs to the base it was started on
         UpdateMoreButton();
     }
@@ -1002,6 +1008,30 @@ public sealed class MainForm : Form
     private static long ControlNumberKey(string? controlNumber) =>
         long.TryParse(controlNumber, out long n) ? n : long.MaxValue;
 
+    /// <summary>The result-list columns differ by base: a bibliographic record is
+    /// Title / Author / Year, an authority is Classification / Heading / Source keyed
+    /// by its accession number (task 2). Called on base switch, so the header always
+    /// matches what's shown.</summary>
+    private void ConfigureResultColumns(string @base)
+    {
+        _resultsList.Columns.Clear();
+        if (@base == "AUT")
+        {
+            _resultsList.Columns.Add("Acc. No.", 70);
+            _resultsList.Columns.Add("Classification", 110);
+            _resultsList.Columns.Add("Heading", 300);
+            _resultsList.Columns.Add("Source", 220);
+        }
+        else
+        {
+            _resultsList.Columns.Add("001", 70);
+            _resultsList.Columns.Add("Title", 300);
+            _resultsList.Columns.Add("Author", 180);
+            _resultsList.Columns.Add("Year", 50);
+            _resultsList.Columns.Add("Status", 60);
+        }
+    }
+
     private void FillResults(IEnumerable<RecordSummary> summaries)
     {
         _resultsList.BeginUpdate();
@@ -1009,10 +1039,19 @@ public sealed class MainForm : Form
         foreach (var s in summaries)
         {
             var item = new ListViewItem(s.ControlNumber ?? "");
-            item.SubItems.Add(s.Title);
-            item.SubItems.Add(s.Author);
-            item.SubItems.Add(s.Year);
-            item.SubItems.Add(s.Status == RecordStatus.Pushed ? "pushed" : "draft");
+            if (s.Base == "AUT")
+            {
+                item.SubItems.Add(s.Classification);
+                item.SubItems.Add(s.Title);   // the full 1XX heading
+                item.SubItems.Add(s.Source);
+            }
+            else
+            {
+                item.SubItems.Add(s.Title);
+                item.SubItems.Add(s.Author);
+                item.SubItems.Add(s.Year);
+                item.SubItems.Add(s.Status == RecordStatus.Pushed ? "pushed" : "draft");
+            }
             item.Tag = s;
             _resultsList.Items.Add(item);
         }
@@ -1107,6 +1146,7 @@ public sealed class MainForm : Form
         var item = new ListViewItem(doc.Stored.Base);
         item.SubItems.Add(doc.Record.ControlNumber ?? "");
         item.SubItems.Add(TitleOf(doc.Record));
+        item.SubItems.Add(SidebarStatus(doc));
         item.Tag = doc;
         _openList.Items.Add(item);
         _openList.SelectedItems.Clear();
@@ -1155,9 +1195,23 @@ public sealed class MainForm : Form
         foreach (var tag in new[] { "245", "100", "110", "111", "130", "150", "151" })
         {
             var f = record.FieldsWithTag(tag).FirstOrDefault();
-            if (f?.Subfields.Count > 0) return f.Subfields[0].Value;
+            if (f?.Subfields.Count > 0)
+                // 245 shows its title proper ($a); an authority heading shows in full,
+                // subfields joined by "--" (Física--Investigación), so subdivisions
+                // aren't dropped (task 5).
+                return tag == "245"
+                    ? f.Subfields[0].Value
+                    : string.Join("--", f.Subfields.Select(s => s.Value));
         }
         return "";
+    }
+
+    /// <summary>The sidebar's pushed/draft marker — a `*` prefix flags unsaved edits.
+    /// Shown for every open record so an authority, too, reads its status (task 18).</summary>
+    private static string SidebarStatus(EditorDocument doc)
+    {
+        string status = doc.Stored.Status == RecordStatus.Pushed ? "pushed" : "draft";
+        return doc.Dirty ? "*" + status : status;
     }
 
     // ---------- editor (Module 6 steps 3-6) ----------
@@ -2392,6 +2446,7 @@ public sealed class MainForm : Form
             if (!ReferenceEquals(item.Tag, doc)) continue;
             item.SubItems[1].Text = doc.Record.ControlNumber ?? "";
             item.SubItems[2].Text = TitleOf(doc.Record);
+            item.SubItems[3].Text = SidebarStatus(doc);
             return;
         }
     }

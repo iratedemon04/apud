@@ -230,18 +230,32 @@ public sealed class RecordRepository
                  WHERE f.record_id = r.id AND f.tag IN ('100','110','111','700','710','711')
                  ORDER BY CASE WHEN f.tag LIKE '1__' THEN 0 ELSE 1 END, f.seq LIMIT 1),
                (SELECT f.content FROM field f
-                 WHERE f.record_id = r.id AND f.tag IN ('260','264') ORDER BY f.seq LIMIT 1)
+                 WHERE f.record_id = r.id AND f.tag IN ('260','264') ORDER BY f.seq LIMIT 1),
+               (SELECT f.content FROM field f
+                 WHERE f.record_id = r.id AND (f.tag = '065' OR f.tag LIKE '08_')
+                 ORDER BY CASE WHEN f.tag = '065' THEN 0 ELSE 1 END, f.seq LIMIT 1),
+               (SELECT f.content FROM field f
+                 WHERE f.record_id = r.id AND f.tag = '670' ORDER BY f.seq LIMIT 1)
         FROM record r
         """;
 
-    private RecordSummary ReadSummary(SqliteDataReader r) => new(
-        r.GetInt64(0), r.GetString(1),
-        r.IsDBNull(2) ? null : r.GetString(2),
-        r.GetString(3) == "pushed" ? RecordStatus.Pushed : RecordStatus.Draft,
-        r.IsDBNull(5) ? "" : FirstSubfieldValue(r.GetString(5)),
-        r.IsDBNull(6) ? "" : FirstSubfieldValue(r.GetString(6)),
-        YearOf(r.IsDBNull(7) ? null : r.GetString(7)),
-        DateTime.Parse(r.GetString(4)).ToUniversalTime());
+    private RecordSummary ReadSummary(SqliteDataReader r)
+    {
+        string @base = r.GetString(1);
+        string heading = r.IsDBNull(5) ? "" : r.GetString(5);
+        return new(
+            r.GetInt64(0), @base,
+            r.IsDBNull(2) ? null : r.GetString(2),
+            r.GetString(3) == "pushed" ? RecordStatus.Pushed : RecordStatus.Draft,
+            // An authority heading shows in full (all subfields joined); a bib Title
+            // is the 245 title proper, so it keeps just the first subfield.
+            @base == "AUT" ? AllSubfieldValues(heading) : FirstSubfieldValue(heading),
+            r.IsDBNull(6) ? "" : FirstSubfieldValue(r.GetString(6)),
+            YearOf(r.IsDBNull(7) ? null : r.GetString(7)),
+            DateTime.Parse(r.GetString(4)).ToUniversalTime(),
+            r.IsDBNull(8) ? "" : FirstSubfieldValue(r.GetString(8)),
+            r.IsDBNull(9) ? "" : FirstSubfieldValue(r.GetString(9)));
+    }
 
     /// <summary>Every record in a base, control-number order. Whole-base — used by
     /// export/backup, which must touch all rows. UI paths should prefer
@@ -636,6 +650,16 @@ public sealed class RecordRepository
     {
         var chunks = packed.Split(MarcConstants.SubfieldDelimiter, StringSplitOptions.RemoveEmptyEntries);
         return chunks.Length == 0 ? "" : chunks[0].Substring(1);
+    }
+
+    /// <summary>The full heading: every subfield value joined by "--", so an
+    /// authority's subdivisions show as "Física--Investigación" (user, 2026-08-02).
+    /// The separator is the same for every subfield type — topical, form, whatever —
+    /// no per-code MARC punctuation is invented.</summary>
+    private static string AllSubfieldValues(string packed)
+    {
+        var chunks = packed.Split(MarcConstants.SubfieldDelimiter, StringSplitOptions.RemoveEmptyEntries);
+        return string.Join("--", chunks.Select(c => c.Substring(1)));
     }
 
     private void Execute(SqliteTransaction? tx, string sql, params (string, object)[] args)
