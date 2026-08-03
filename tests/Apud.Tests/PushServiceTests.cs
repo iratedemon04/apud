@@ -189,6 +189,29 @@ public class PushServiceTests : IDisposable
     }
 
     [Fact]
+    public void Clearing_a_DRAFT_AUT_001_assigns_the_next_number_on_push()
+    {
+        // Two authorities already numbered in the base.
+        PushedAuthorityNumbered("Alpha", "10");
+        PushedAuthorityNumbered("Beta", "20");
+
+        // A third authority saved as a DRAFT (never pushed) carrying an imported 001.
+        var r = new MarcRecord { Leader = "00000nz  a2200000n  4500" };
+        r.Fields.Add(new MarcField("001") { ControlData = "999" });
+        r.Fields.Add(Data("100", '1', ' ', ('a', "Gamma")));
+        var draft = new StoredRecord("AUT", r) { Status = RecordStatus.Draft };
+        Repo.SaveDraft(draft);
+
+        // Delete the draft's 001 and push: it earns the next number after the OTHER
+        // authorities (20 → 21), not its own imported 999 (task 19, AUT-only).
+        draft.Record.Fields.RemoveAll(f => f.Tag == "001");
+        var result = Push(draft);
+
+        Assert.True(result.Ok);
+        Assert.Equal("21", result.ControlNumber);
+    }
+
+    [Fact]
     public void BIB_keeps_its_own_ceiling_unchanged()
     {
         // BIB is deliberately left as-is: the record's own number still counts, so

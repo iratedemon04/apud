@@ -172,7 +172,7 @@ public sealed class MainForm : Form
         _commands.Add(new Command { Id = "field.validate", Name = "Browse && Link &Heading", Context = CommandContext.Editor, DefaultKey = "Ctrl+F4", Execute = BrowseAndLinkHeading });
         _commands.Add(new Command { Id = "record.validate", Name = "Validate &Record", Context = CommandContext.Editor, DefaultKey = "Ctrl+W", Execute = ValidateRecord });
         _commands.Add(new Command { Id = "record.push", Name = "Validate && &Push", Context = CommandContext.Editor, DefaultKey = "Ctrl+L", Execute = PushRecord });
-        _commands.Add(new Command { Id = "record.delete", Name = "&Delete Record...", Context = CommandContext.Editor, DefaultKey = "Ctrl+Delete", Execute = DeleteRecord });
+        _commands.Add(new Command { Id = "record.delete", Name = "&Delete Record/Draft...", Context = CommandContext.Editor, DefaultKey = "Ctrl+Delete", Execute = DeleteRecord });
 
         _keymap = Keymap.LoadFile(_commands, Path.Combine(AppContext.BaseDirectory, Keymap.FileName));
 
@@ -1144,7 +1144,7 @@ public sealed class MainForm : Form
     private void AddToSidebar(EditorDocument doc)
     {
         var item = new ListViewItem(doc.Stored.Base);
-        item.SubItems.Add(doc.Record.ControlNumber ?? "");
+        item.SubItems.Add(AccessionSlot(doc) ?? "");
         item.SubItems.Add(TitleOf(doc.Record));
         item.SubItems.Add(SidebarStatus(doc));
         item.Tag = doc;
@@ -1278,9 +1278,23 @@ public sealed class MainForm : Form
     private void UpdateHeader()
     {
         if (_currentDoc is null) return;
+        // An edited record with no accession number yet shows "***" in the number
+        // slot; once pushed, its assigned 001 replaces it (task 15). HeaderText only
+        // special-cases null, so passing a non-null "***" flows straight through.
+        string? number = AccessionSlot(_currentDoc);
         _recordHeader.Text =
-            RecordDisplay.HeaderText(_currentDoc.Stored.Base, _currentDoc.Record.ControlNumber, _currentDoc.Record)
+            RecordDisplay.HeaderText(_currentDoc.Stored.Base, number, _currentDoc.Record)
             + (_currentDoc.Dirty ? "  *" : "");
+    }
+
+    /// <summary>The accession-number display for a record: its 001 when it has one,
+    /// otherwise "***" while it is being edited (a placeholder for the number it will
+    /// earn on push), or null/blank when clean and unnumbered (task 15).</summary>
+    private static string? AccessionSlot(EditorDocument doc)
+    {
+        var cn = doc.Record.ControlNumber;
+        if (!string.IsNullOrEmpty(cn)) return cn;
+        return doc.Dirty ? "***" : null;
     }
 
     /// <summary>Which cells accept typing, per row shape: the name column never;
@@ -1346,6 +1360,7 @@ public sealed class MainForm : Form
 
         if (error != null) SetMessage(error);
         UpdateHeader();
+        UpdateSidebarItem(doc); // keep the sidebar's accession "***" / status in sync as you edit
         if (structural)
         {
             // The grid has already advanced the cursor (Tab/Enter) to the next
@@ -2325,7 +2340,10 @@ public sealed class MainForm : Form
         }
 
         string cn = doc.Record.ControlNumber ?? "(no 001)";
-        if (MessageBox.Show(this,
+        // A pushed record is live catalogue data — deleting it warrants a warning.
+        // A draft was never in the catalogue proper, so it deletes without one
+        // (user request: the warning is for records, not drafts — task 16).
+        if (doc.Stored.Status == RecordStatus.Pushed && MessageBox.Show(this,
                 $"Delete record {cn} from {doc.Stored.Base}?\n\n" +
                 $"This removes it from the catalogue and deletes its {cn}.mrk " +
                 "file from the MARC output folder, if present. This cannot be undone.",
@@ -2444,7 +2462,7 @@ public sealed class MainForm : Form
         foreach (ListViewItem item in _openList.Items)
         {
             if (!ReferenceEquals(item.Tag, doc)) continue;
-            item.SubItems[1].Text = doc.Record.ControlNumber ?? "";
+            item.SubItems[1].Text = AccessionSlot(doc) ?? "";
             item.SubItems[2].Text = TitleOf(doc.Record);
             item.SubItems[3].Text = SidebarStatus(doc);
             return;
