@@ -20,7 +20,7 @@ public sealed class ImportWizardForm : Form
     private readonly RadioButton _asDrafts;
     private readonly Button _import;
 
-    public ImportMode SelectedMode { get; private set; } = ImportMode.AsPushed;
+    public ImportMode SelectedMode { get; private set; } = ImportMode.AsDrafts;
 
     public ImportWizardForm(string folder, ImportReport report)
     {
@@ -109,7 +109,6 @@ public sealed class ImportWizardForm : Form
             AutoSize = false,
             Dock = DockStyle.Top,
             Height = 22,
-            Checked = true,
         };
         _asDrafts = new RadioButton
         {
@@ -117,6 +116,7 @@ public sealed class ImportWizardForm : Form
             AutoSize = false,
             Dock = DockStyle.Top,
             Height = 22,
+            Checked = true, // default to the safe, non-committal mode (user request 2026-08-02)
         };
         _asPushed.CheckedChanged += (_, _) => UpdateImportEnabled();
         _asDrafts.CheckedChanged += (_, _) => UpdateImportEnabled();
@@ -150,8 +150,9 @@ public sealed class ImportWizardForm : Form
         AcceptButton = _import;
         CancelButton = cancel;
 
-        // Default to the strictest legal mode.
-        if (!report.CanCommitAsPushed && report.CanCommitAsDrafts) _asDrafts.Checked = true;
+        // Default to DRAFTS (above); fall back to PUSHED only if drafts can't
+        // commit but pushed can (rare — duplicate 001s block both).
+        if (!report.CanCommitAsDrafts && report.CanCommitAsPushed) _asPushed.Checked = true;
         UpdateImportEnabled();
     }
 

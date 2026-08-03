@@ -132,7 +132,7 @@ public sealed class MainForm : Form
         // Catalogue commands are menu-only (§6.2: record commands own the keyboard).
         _commands.Add(new Command { Id = "catalogue.new", Name = "&New Catalogue...", Execute = NewCatalog });
         _commands.Add(new Command { Id = "catalogue.open", Name = "&Open Catalogue...", DefaultKey = "Ctrl+O", Execute = OpenCatalogDialog });
-        _commands.Add(new Command { Id = "catalogue.import", Name = "&Import Records...", Execute = ImportRecords });
+        _commands.Add(new Command { Id = "catalogue.import", Name = "&Import Records...", DefaultKey = "Ctrl+I", Execute = ImportRecords });
         _commands.Add(new Command { Id = "catalogue.marc-out", Name = "Set &BIB Output Folder...", Execute = () => SetMarcOutFolder("BIB") });
         _commands.Add(new Command { Id = "catalogue.marc-out-aut", Name = "Set &Authority Output Folder...", Execute = () => SetMarcOutFolder("AUT") });
         _commands.Add(new Command { Id = "catalogue.org-code", Name = "Set &Organization Code...", Execute = SetOrgCode });
@@ -148,7 +148,7 @@ public sealed class MainForm : Form
         _commands.Add(new Command { Id = "search.focus", Name = "&Search", DefaultKey = "F2", Execute = ShowSearchView });
         _commands.Add(new Command { Id = "help.field", Name = "&Field Help", DefaultKey = "F1", Execute = ShowFieldHelp });
         _commands.Add(new Command { Id = "help.intro", Name = "&Getting Started", Execute = ShowIntro });
-        _commands.Add(new Command { Id = "help.backup-time", Name = "Bac&kup Time", Execute = ShowBackupTime });
+        _commands.Add(new Command { Id = "help.backup-time", Name = "Bac&kup Times", Execute = ShowBackupTime });
         _commands.Add(new Command { Id = "help.about", Name = "&About Apud", Execute = ShowAbout });
         // Editor commands (Module 6 steps 3-7). §6.2: record commands own the keyboard.
         _commands.Add(new Command { Id = "record.new", Name = "&New Record / Copy", DefaultKey = "Ctrl+N", Execute = NewRecord });
@@ -1076,19 +1076,25 @@ public sealed class MainForm : Form
     {
         if (_repo is null || _resultsList.SelectedItems.Count == 0) return;
         var s = (RecordSummary)_resultsList.SelectedItems[0].Tag!;
+        OpenRecordById(s.Id);
+    }
 
-        // Already open? Select it instead of duplicating.
+    /// <summary>Opens a stored record into the sidebar by id — selecting it if it
+    /// is already open rather than duplicating. Shared by result double-click and
+    /// the single-record import "open it immediately" path (task 1).</summary>
+    private void OpenRecordById(long id)
+    {
+        if (_repo is null) return;
         foreach (ListViewItem existing in _openList.Items)
         {
-            if (existing.Tag is EditorDocument d && d.Stored.Id == s.Id)
+            if (existing.Tag is EditorDocument d && d.Stored.Id == id)
             {
                 existing.Selected = true;
                 ShowRecordView();
                 return;
             }
         }
-
-        var stored = _repo.Load(s.Id);
+        var stored = _repo.Load(id);
         if (stored is null) return;
         AddToSidebar(new EditorDocument(stored));
     }
@@ -2526,6 +2532,11 @@ public sealed class MainForm : Form
         {
             var result = new ImportEngine(_repo!).Commit(plan, wizard.SelectedMode);
             SetMessage($"Imported {result.RecordsImported} record(s) — BIB {result.BibCount}, AUT {result.AutCount}.");
+            // A single record opens straight into the editor — no hunting for it
+            // in search afterwards (task 1). This works for a draft too (it would
+            // otherwise be out of search), since we open it by id.
+            if (result.ImportedIds.Count == 1)
+                OpenRecordById(result.ImportedIds[0]);
         }
         catch (Microsoft.Data.Sqlite.SqliteException e)
         {

@@ -76,6 +76,20 @@ public class ImportExportTests : IDisposable
     }
 
     [Fact]
+    public void Commit_returns_the_ids_it_inserted()
+    {
+        // Backs the "single record opens immediately" UI path (task 1): the app
+        // opens result.ImportedIds[0] when exactly one record was imported.
+        WriteFile("a.mrk", Bib("1", "Uno") + "\n" + Bib("2", "Dos"));
+        var plan = Engine.AnalyzeFolder(_dir);
+
+        var result = Engine.Commit(plan, ImportMode.AsDrafts);
+
+        Assert.Equal(2, result.ImportedIds.Count);
+        Assert.All(result.ImportedIds, id => Assert.NotNull(Repo.Load(id)));
+    }
+
+    [Fact]
     public void Broken_file_reports_errors_with_line_numbers_and_blocks_pushed_commit()
     {
         WriteFile("clean.mrk", Bib("1", "Uno"));

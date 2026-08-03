@@ -73,7 +73,7 @@ public sealed class ImportPlan
 
 internal sealed record PlannedRecord(string FilePath, string Base, MarcRecord Record);
 
-public sealed record ImportResult(int RecordsImported, int BibCount, int AutCount);
+public sealed record ImportResult(int RecordsImported, int BibCount, int AutCount, IReadOnlyList<long> ImportedIds);
 
 /// <summary>
 /// Headless import: a list of .mrk files (or a folder) is parsed and reported on,
@@ -152,6 +152,7 @@ public sealed class ImportEngine
         var status = mode == ImportMode.AsPushed ? RecordStatus.Pushed : RecordStatus.Draft;
         var highest = new Dictionary<string, long> { ["BIB"] = 0, ["AUT"] = 0 };
         int bib = 0, aut = 0;
+        var ids = new List<long>();
         var now = DateTime.UtcNow;
 
         using var tx = _repo.BeginTransaction(); // disposed uncommitted = rolled back
@@ -159,6 +160,7 @@ public sealed class ImportEngine
         {
             var stored = new StoredRecord(p.Base, p.Record) { Status = status };
             _repo.InsertCore(tx, stored, now);
+            ids.Add(stored.Id);
 
             if (p.Base == "BIB") bib++; else aut++;
             if (long.TryParse(p.Record.ControlNumber, out long n) && n > highest[p.Base])
@@ -170,6 +172,6 @@ public sealed class ImportEngine
                 _repo.BumpSequencePast(tx, @base, top);
 
         tx.Commit();
-        return new ImportResult(bib + aut, bib, aut);
+        return new ImportResult(bib + aut, bib, aut, ids);
     }
 }

@@ -7,7 +7,7 @@ namespace Apud.App;
 /// The first-backup notice: warns that a large catalogue's <b>very first</b> server
 /// backup uploads every record and can take a while, with a table of rough estimates
 /// up to a million records. Auto-shows once before the first backup of each catalogue
-/// (any size — even one record) and is reopenable any time from Help → Backup Time,
+/// (any size — even one record) and is reopenable any time from Help → Backup Times,
 /// exactly like the Getting Started intro.
 ///
 /// Estimates assume one record file per second-ish of sequential SFTP (~12 ms/file
@@ -31,20 +31,20 @@ public sealed class BackupTimeForm : Form
     /// Back Up Now / Cancel); false when opened from Help (just Close).</param>
     public BackupTimeForm(bool preBackup)
     {
-        Text = "Apud — Backup Time";
+        Text = "Apud — Backup Times";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
         MaximizeBox = false;
-        ClientSize = new Size(440, 372);
+        ClientSize = new Size(440, 302);
 
         var warning = new Label
         {
             Dock = DockStyle.Top,
-            Height = 46,
+            Height = 56,
             Padding = new Padding(18, 16, 18, 0),
             Font = new Font("Segoe UI", 9.75f, FontStyle.Bold),
-            Text = "Warning! Large catalogs may take a while to upload on the very first backup.",
+            Text = "Warning, the first backup upload may take a while depending on the size of your catalogue.",
         };
 
         var table = new ListView
@@ -62,25 +62,12 @@ public sealed class BackupTimeForm : Form
         foreach (var (size, time) in Estimates)
             table.Items.Add(new ListViewItem(new[] { size, time }));
 
-        var note = new Label
-        {
-            Dock = DockStyle.Top,
-            Height = 74,
-            Padding = new Padding(18, 8, 18, 0),
-            ForeColor = SystemColors.GrayText,
-            Font = new Font("Segoe UI", 9f),
-            Text =
-                "Times are approximate and depend on your connection. Only the first\n" +
-                "backup uploads everything — later backups send just the records you\n" +
-                "have changed, so they stay quick.",
-        };
-
         var proceed = new Button
         {
             Text = preBackup ? "Back Up Now" : "Close",
             DialogResult = DialogResult.OK,
             Size = new Size(110, 30),
-            Location = new Point(314, 332),
+            Location = new Point(314, 260),
             Anchor = AnchorStyles.Right | AnchorStyles.Bottom,
         };
         Controls.Add(proceed);
@@ -92,7 +79,7 @@ public sealed class BackupTimeForm : Form
                 Text = "Cancel",
                 DialogResult = DialogResult.Cancel,
                 Size = new Size(90, 30),
-                Location = new Point(218, 332),
+                Location = new Point(218, 260),
                 Anchor = AnchorStyles.Right | AnchorStyles.Bottom,
             };
             Controls.Add(cancel);
@@ -104,8 +91,7 @@ public sealed class BackupTimeForm : Form
         }
 
         // Docked controls add top-down; add bottom-most first so the visual order is
-        // warning → table → note.
-        Controls.Add(note);
+        // warning → table.
         Controls.Add(table);
         Controls.Add(warning);
         AcceptButton = proceed;
