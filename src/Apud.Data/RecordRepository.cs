@@ -216,43 +216,91 @@ public sealed class RecordRepository
 
     // ---------- list / delete ----------
 
+    // The summary projection shared by every list path. Title: 245$a for BIB, 1XX
+    // first subfield for both bases. Author: 100/110/111 heading, else first
+    // 700/710/711. Year: the 260/264 $c transcription only — never the coded 008
+    // date (real catalogues stuff brackets/fill into its 4-char slot, so the
+    // human-entered field is the one to trust). See YearOf.
+    private const string SummarySelect = """
+        SELECT r.id, r.base, r.control_number, r.status, r.updated_utc,
+               (SELECT f.content FROM field f
+                 WHERE f.record_id = r.id AND (f.tag = '245' OR f.tag LIKE '1__')
+                 ORDER BY CASE WHEN f.tag = '245' THEN 0 ELSE 1 END, f.seq LIMIT 1),
+               (SELECT f.content FROM field f
+                 WHERE f.record_id = r.id AND f.tag IN ('100','110','111','700','710','711')
+                 ORDER BY CASE WHEN f.tag LIKE '1__' THEN 0 ELSE 1 END, f.seq LIMIT 1),
+               (SELECT f.content FROM field f
+                 WHERE f.record_id = r.id AND f.tag IN ('260','264') ORDER BY f.seq LIMIT 1)
+        FROM record r
+        """;
+
+    private RecordSummary ReadSummary(SqliteDataReader r) => new(
+        r.GetInt64(0), r.GetString(1),
+        r.IsDBNull(2) ? null : r.GetString(2),
+        r.GetString(3) == "pushed" ? RecordStatus.Pushed : RecordStatus.Draft,
+        r.IsDBNull(5) ? "" : FirstSubfieldValue(r.GetString(5)),
+        r.IsDBNull(6) ? "" : FirstSubfieldValue(r.GetString(6)),
+        YearOf(r.IsDBNull(7) ? null : r.GetString(7)),
+        DateTime.Parse(r.GetString(4)).ToUniversalTime());
+
+    /// <summary>Every record in a base, control-number order. Whole-base — used by
+    /// export/backup, which must touch all rows. UI paths should prefer
+    /// <see cref="ListPage"/> / <see cref="ListByIds"/> so they stay O(page), not O(base).</summary>
     public List<RecordSummary> List(string @base)
     {
         var list = new List<RecordSummary>();
         using var cmd = _db.Connection.CreateCommand();
-        // Title for the list pane: 245$a for BIB; 1XX first subfield works for both bases.
-        // Author: 100/110/111 heading, falling back to the first 700/710/711.
-        // Year: the 260/264 $c transcription only — never the coded 008 date
-        // (real catalogues stuff brackets and fill characters into its 4-char
-        // slot, so the human-entered field is the one to trust). See YearOf.
-        cmd.CommandText = """
-            SELECT r.id, r.base, r.control_number, r.status, r.updated_utc,
-                   (SELECT f.content FROM field f
-                     WHERE f.record_id = r.id AND (f.tag = '245' OR f.tag LIKE '1__')
-                     ORDER BY CASE WHEN f.tag = '245' THEN 0 ELSE 1 END, f.seq LIMIT 1),
-                   (SELECT f.content FROM field f
-                     WHERE f.record_id = r.id AND f.tag IN ('100','110','111','700','710','711')
-                     ORDER BY CASE WHEN f.tag LIKE '1__' THEN 0 ELSE 1 END, f.seq LIMIT 1),
-                   (SELECT f.content FROM field f
-                     WHERE f.record_id = r.id AND f.tag IN ('260','264') ORDER BY f.seq LIMIT 1)
-            FROM record r WHERE r.base = $base
-            ORDER BY CAST(r.control_number AS INTEGER), r.id;
-            """;
+        cmd.CommandText = SummarySelect + " WHERE r.base = $base ORDER BY CAST(r.control_number AS INTEGER), r.id;";
         cmd.Parameters.AddWithValue("$base", @base);
         using var r = cmd.ExecuteReader();
-        while (r.Read())
-        {
-            string title = r.IsDBNull(5) ? "" : FirstSubfieldValue(r.GetString(5));
-            string author = r.IsDBNull(6) ? "" : FirstSubfieldValue(r.GetString(6));
-            string year = YearOf(r.IsDBNull(7) ? null : r.GetString(7));
-            list.Add(new RecordSummary(
-                r.GetInt64(0), r.GetString(1),
-                r.IsDBNull(2) ? null : r.GetString(2),
-                r.GetString(3) == "pushed" ? RecordStatus.Pushed : RecordStatus.Draft,
-                title, author, year,
-                DateTime.Parse(r.GetString(4)).ToUniversalTime()));
-        }
+        while (r.Read()) list.Add(ReadSummary(r));
         return list;
+    }
+
+    /// <summary>One page of a base in control-number order — the scalable "List All".</summary>
+    public List<RecordSummary> ListPage(string @base, int limit, int offset)
+    {
+        var list = new List<RecordSummary>();
+        using var cmd = _db.Connection.CreateCommand();
+        cmd.CommandText = SummarySelect +
+            " WHERE r.base = $base ORDER BY CAST(r.control_number AS INTEGER), r.id LIMIT $limit OFFSET $offset;";
+        cmd.Parameters.AddWithValue("$base", @base);
+        cmd.Parameters.AddWithValue("$limit", limit);
+        cmd.Parameters.AddWithValue("$offset", offset);
+        using var r = cmd.ExecuteReader();
+        while (r.Read()) list.Add(ReadSummary(r));
+        return list;
+    }
+
+    /// <summary>Summaries for a specific set of ids (e.g. the ≤200 FTS hits) — so a search
+    /// hydrates only its results, never the whole base. Order is unspecified; the caller
+    /// re-imposes the ranking it wants.</summary>
+    public List<RecordSummary> ListByIds(IReadOnlyCollection<long> ids)
+    {
+        var list = new List<RecordSummary>();
+        if (ids.Count == 0) return list;
+        using var cmd = _db.Connection.CreateCommand();
+        var names = new List<string>(ids.Count);
+        int i = 0;
+        foreach (long id in ids)
+        {
+            string p = "$id" + i++;
+            names.Add(p);
+            cmd.Parameters.AddWithValue(p, id);
+        }
+        cmd.CommandText = SummarySelect + " WHERE r.id IN (" + string.Join(",", names) + ");";
+        using var r = cmd.ExecuteReader();
+        while (r.Read()) list.Add(ReadSummary(r));
+        return list;
+    }
+
+    /// <summary>Count of records in a base — a cheap COUNT(*), not a full materialisation.</summary>
+    public int Count(string @base)
+    {
+        using var cmd = _db.Connection.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM record WHERE base = $base;";
+        cmd.Parameters.AddWithValue("$base", @base);
+        return Convert.ToInt32(cmd.ExecuteScalar());
     }
 
     /// <summary>

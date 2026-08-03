@@ -38,6 +38,10 @@ public sealed class MainForm : Form
     private readonly ListView _historyList;
     private readonly SearchHistory _history = new();
     private IReadOnlyList<RecordSummary> _currentResults = Array.Empty<RecordSummary>();
+    private Button _moreButton = null!;   // "Load next N" bar for a paged List All
+    private bool _listAllMode;            // true while a paged whole-base listing is shown
+    private int _listAllTotal;            // total records in the base being paged
+    private const int ListPageSize = 1000;
 
     private readonly Label _recordHeader;
     private readonly DataGridView _viewer;
@@ -373,10 +377,20 @@ public sealed class MainForm : Form
         _historyList.Columns.Add("Hits", 50, HorizontalAlignment.Right);
         _historyList.DoubleClick += (_, _) => RerunFromHistory();
 
+        _moreButton = new Button
+        {
+            Dock = DockStyle.Bottom,
+            Height = 26,
+            Visible = false,
+            FlatStyle = FlatStyle.System,
+        };
+        _moreButton.Click += (_, _) => LoadMoreListAll();
+
         _searchView = new Panel { Dock = DockStyle.Fill };
         _searchView.Controls.Add(_resultsList);
         _searchView.Controls.Add(searchForm);
         _searchView.Controls.Add(_historyList);
+        _searchView.Controls.Add(_moreButton); // docks above history, just under the results
 
         // ----- record view -----
         _recordHeader = new Label
@@ -835,12 +849,14 @@ public sealed class MainForm : Form
         _openList.Items.Clear();
         _resultsList.Items.Clear();
         _currentResults = Array.Empty<RecordSummary>();
+        _listAllMode = false;
+        UpdateMoreButton();
         _historyList.Items.Clear();
         ClearViewer();
         ShowSearchView();
 
         Text = $"Apud — {path}";
-        SetMessage($"Catalogue open — BIB: {_repo.List("BIB").Count}, AUT: {_repo.List("AUT").Count} record(s).");
+        SetMessage($"Catalogue open — BIB: {_repo.Count("BIB")}, AUT: {_repo.Count("AUT")} record(s).");
     }
 
     // ---------- base ----------
@@ -854,6 +870,8 @@ public sealed class MainForm : Form
         _searchBase.SelectedIndex = @base == "AUT" ? 1 : 0;
         _syncingBase = false;
         PopulateScopes(@base);
+        _listAllMode = false; // a paged listing belongs to the base it was started on
+        UpdateMoreButton();
     }
 
     /// <summary>Fills the scope dropdown with the current base's indexes (BIB and
@@ -883,22 +901,60 @@ public sealed class MainForm : Form
         _history.Add(new SearchHistoryEntry(query, scope, CurrentBase, ids.Count));
         RefreshHistoryList();
 
-        // ids arrive in FTS relevance order; keep that as the base order so the
-        // Relevance sort can reproduce it. Other sorts reorder in RenderResults.
-        var byId = _repo.List(CurrentBase).ToDictionary(s => s.Id);
+        // Hydrate ONLY the hits (never the whole base): FTS returns ≤200 ids, so this
+        // stays fast at any catalogue size. ids arrive in FTS relevance order; keep that
+        // as the base order so the Relevance sort can reproduce it (other sorts reorder
+        // in RenderResults).
+        var byId = _repo.ListByIds(ids).ToDictionary(s => s.Id);
         _currentResults = ids.Select(id => byId.GetValueOrDefault(id)).Where(s => s != null).Cast<RecordSummary>().ToList();
+        _listAllMode = false; // a search is not a paged list
+        UpdateMoreButton();
         RenderResults();
         SetMessage($"{ids.Count} hit(s) for \"{query}\" in {CurrentBase}.");
     }
 
-    /// <summary>The explicit whole-base listing. Feeds the same sort dropdown; its
-    /// natural order is control-number, which is also the default sort.</summary>
+    /// <summary>The explicit whole-base listing, paged: shows the first
+    /// <see cref="ListPageSize"/> records and offers a "Load next N" bar to keep going —
+    /// so opening a 500,000-record base never tries to build one giant list. Feeds the
+    /// same sort dropdown; natural order is control-number, which is also the default.</summary>
     private void ListAll()
     {
         if (!RequireCatalogue()) return;
-        _currentResults = _repo.List(CurrentBase);
+        _listAllMode = true;
+        _listAllTotal = _repo.Count(CurrentBase);
+        _currentResults = _repo.ListPage(CurrentBase, ListPageSize, 0);
+        UpdateMoreButton();
         RenderResults();
-        SetMessage($"{CurrentBase}: {_currentResults.Count} record(s).");
+        SetMessage($"{CurrentBase}: showing {_currentResults.Count:N0} of {_listAllTotal:N0} record(s).");
+    }
+
+    /// <summary>Loads and appends the next page of a List All, then updates the bar.</summary>
+    private void LoadMoreListAll()
+    {
+        if (!_listAllMode || _repo is null) return;
+        var next = _repo.ListPage(CurrentBase, ListPageSize, _currentResults.Count);
+        _currentResults = _currentResults.Concat(next).ToList();
+        UpdateMoreButton();
+        RenderResults();
+        SetMessage($"{CurrentBase}: showing {_currentResults.Count:N0} of {_listAllTotal:N0} record(s).");
+    }
+
+    /// <summary>Shows the "Load next N" bar with the remaining count while a paged List
+    /// All has more to load; hides it otherwise (including for searches).</summary>
+    private void UpdateMoreButton()
+    {
+        if (_moreButton is null) return;
+        int remaining = _listAllMode ? _listAllTotal - _currentResults.Count : 0;
+        if (remaining > 0)
+        {
+            _moreButton.Text =
+                $"Load next {Math.Min(ListPageSize, remaining):N0}   (showing {_currentResults.Count:N0} of {_listAllTotal:N0})";
+            _moreButton.Visible = true;
+        }
+        else
+        {
+            _moreButton.Visible = false;
+        }
     }
 
     /// <summary>Orders <see cref="_currentResults"/> by the chosen sort and fills the
@@ -2405,7 +2461,7 @@ public sealed class MainForm : Form
     private void ExportBase()
     {
         if (!RequireCatalogue()) return;
-        int count = _repo.List(CurrentBase).Count;
+        int count = _repo.Count(CurrentBase);
         if (count == 0) { SetMessage($"{CurrentBase} is empty — nothing to export."); return; }
         ExportTo($"{CurrentBase}.mrk", path =>
         {

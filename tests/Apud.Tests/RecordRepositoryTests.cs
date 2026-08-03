@@ -151,6 +151,38 @@ public class RecordRepositoryTests : IDisposable
     }
 
     [Fact]
+    public void ListPage_and_Count_page_a_base_without_loading_it_all()
+    {
+        for (int cn = 1; cn <= 5; cn++)
+            Repo.Insert(new StoredRecord("BIB", Parse(Monograph.Replace("=001  1\n", $"=001  {cn}\n"))));
+
+        Assert.Equal(5, Repo.Count("BIB"));
+        Assert.Equal(0, Repo.Count("AUT"));
+
+        // Two pages of 2 (control-number order), then the last one.
+        Assert.Equal(new[] { "1", "2" }, Repo.ListPage("BIB", 2, 0).Select(s => s.ControlNumber));
+        Assert.Equal(new[] { "3", "4" }, Repo.ListPage("BIB", 2, 2).Select(s => s.ControlNumber));
+        Assert.Equal(new[] { "5" }, Repo.ListPage("BIB", 2, 4).Select(s => s.ControlNumber));
+        Assert.Empty(Repo.ListPage("BIB", 2, 5));
+    }
+
+    [Fact]
+    public void ListByIds_hydrates_only_the_given_records()
+    {
+        var repo = Repo;
+        for (int cn = 1; cn <= 4; cn++)
+            repo.Insert(new StoredRecord("BIB", Parse(Monograph.Replace("=001  1\n", $"=001  {cn}\n"))));
+        var all = repo.List("BIB");
+        long id2 = all.Single(s => s.ControlNumber == "2").Id;
+        long id4 = all.Single(s => s.ControlNumber == "4").Id;
+
+        var got = repo.ListByIds(new[] { id4, id2 });
+        Assert.Equal(2, got.Count);
+        Assert.Equal(new[] { "2", "4" }, got.Select(s => s.ControlNumber).OrderBy(x => x)); // both, order unspecified
+        Assert.Empty(repo.ListByIds(System.Array.Empty<long>()));
+    }
+
+    [Fact]
     public void List_year_comes_from_the_publication_field_never_the_008()
     {
         // Record 177's 008 held "[1960]" stuffed into its 4-char date slot and
