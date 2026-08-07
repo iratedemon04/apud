@@ -14,7 +14,7 @@ namespace Apud.Data;
 /// </summary>
 public sealed class ApudDatabase : IDisposable
 {
-    public const int SchemaVersion = 5;
+    public const int SchemaVersion = 6;
 
     public SqliteConnection Connection { get; }
 
@@ -50,6 +50,7 @@ public sealed class ApudDatabase : IDisposable
         if (version == 2) { UpgradeV2ToV3(); version = 3; }             // v3: authority browse index
         if (version == 3) { RebuildFtsToCurrentShape(); version = 4; }  // v4: notes + call-number scopes
         if (version == 4) { RebuildFtsToCurrentShape(); version = 5; }  // v5: per-heading + series/publisher/isbn scopes
+        if (version == 5) { RebuildFtsToCurrentShape(); version = 6; }  // v6: local 9XX scope
 
         Execute($"PRAGMA user_version = {SchemaVersion};");
     }

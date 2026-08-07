@@ -70,9 +70,10 @@ public sealed class EditorDocument
     /// </summary>
     public string? SetTag(int fieldIndex, string text)
     {
+        var old = Record.Fields[fieldIndex];
+        if (text == old.Tag) return null; // unchanged (e.g. tabbing past an untyped blank field) — silent
         text = text.Trim();
         if (text.Length != 3) return "A tag is exactly 3 characters — not changed.";
-        var old = Record.Fields[fieldIndex];
         if (old.Tag == text) return null;
 
         var replacement = new MarcField(text) { AuthLinkId = old.AuthLinkId };

@@ -61,6 +61,7 @@ public sealed class MainForm : Form
         ("Notes", SearchScope.Notes),
         ("Call No.", SearchScope.CallNumber),
         ("ISBN/ISSN", SearchScope.Isbn),
+        ("Local (9XX)", SearchScope.Local9xx),
         ("Control No.", SearchScope.ControlNumber),
     };
 
@@ -110,6 +111,7 @@ public sealed class MainForm : Form
     private bool _rendering;             // grid is being rebuilt; ignore its edit events
     private bool _resumeEditAfterRender; // a structural edit re-rendered mid-typing; drop back into the cell
     private string? _editCol;            // column name of the cell currently being edited (for PrimeEditingBox)
+    private bool _caretAtStartNextEdit;  // next edit drops the caret at the START of the value (Insert, task #3)
     private MarcField? _fieldClipboard;      // Ctrl+T copy field / Alt+T paste
     private MarcSubfield? _subfieldClipboard; // Ctrl+S copy subfield / Alt+S paste
     private int _pushesSinceSync;            // records pushed since the last server backup
@@ -172,7 +174,15 @@ public sealed class MainForm : Form
         _commands.Add(new Command { Id = "field.validate", Name = "Browse && Link &Heading", Context = CommandContext.Editor, DefaultKey = "Ctrl+F4", Execute = BrowseAndLinkHeading });
         _commands.Add(new Command { Id = "record.validate", Name = "Validate &Record", Context = CommandContext.Editor, DefaultKey = "Ctrl+W", Execute = ValidateRecord });
         _commands.Add(new Command { Id = "record.push", Name = "Validate && &Push", Context = CommandContext.Editor, DefaultKey = "Ctrl+L", Execute = PushRecord });
-        _commands.Add(new Command { Id = "record.delete", Name = "&Delete Record/Draft...", Context = CommandContext.Editor, DefaultKey = "Ctrl+Delete", Execute = DeleteRecord });
+        // Close = remove from the open-records list (not destructive). Ctrl+Delete
+        // closes the selected record(s), Ctrl+C closes them all; either warns first
+        // if anything is unsaved, and Enter confirms (tasks #5, #6). Both Global so
+        // they work from the editor or the search screen.
+        _commands.Add(new Command { Id = "record.close", Name = "&Close Record", DefaultKey = "Ctrl+Delete", Execute = RemoveSelectedOpenRecords });
+        _commands.Add(new Command { Id = "record.close-all", Name = "Close &All Records", DefaultKey = "Ctrl+C", Execute = RemoveAllOpenRecords });
+        // Catalogue-delete is destructive and rarer, so it is menu-only now that
+        // Ctrl+Delete closes records (task #6); it keeps its own confirmation dialog.
+        _commands.Add(new Command { Id = "record.delete", Name = "&Delete Record/Draft...", Context = CommandContext.Editor, Execute = DeleteRecord });
 
         _keymap = Keymap.LoadFile(_commands, Path.Combine(AppContext.BaseDirectory, Keymap.FileName));
 
@@ -231,6 +241,8 @@ public sealed class MainForm : Form
         record.DropDownItems.Add(MenuItem("record.validate"));
         record.DropDownItems.Add(MenuItem("record.push"));
         record.DropDownItems.Add(new ToolStripSeparator());
+        record.DropDownItems.Add(MenuItem("record.close"));
+        record.DropDownItems.Add(MenuItem("record.close-all"));
         record.DropDownItems.Add(MenuItem("record.delete"));
 
         var help = new ToolStripMenuItem("&Help");
@@ -259,13 +271,11 @@ public sealed class MainForm : Form
         _openList.Columns.Add("Title", 130);
         _openList.Columns.Add("Status", 50);
         _openList.SelectedIndexChanged += (_, _) => ShowSelectedOpenRecord();
-        _openList.KeyDown += (_, e) =>
-        {
-            if (e.KeyCode == Keys.Delete) RemoveSelectedOpenRecords();
-        };
+        // Closing is on Ctrl+Delete (record.close) / Ctrl+C (record.close-all) now —
+        // bare Delete no longer closes a record out from under the cataloguer (task #6).
         var openMenu = new ContextMenuStrip();
-        openMenu.Items.Add("Remove", null, (_, _) => RemoveSelectedOpenRecords());
-        openMenu.Items.Add("Remove All", null, (_, _) => RemoveAllOpenRecords());
+        openMenu.Items.Add("Close", null, (_, _) => RemoveSelectedOpenRecords());
+        openMenu.Items.Add("Close All", null, (_, _) => RemoveAllOpenRecords());
         _openList.ContextMenuStrip = openMenu;
 
         var openLabel = new Label
@@ -437,6 +447,11 @@ public sealed class MainForm : Form
             CellBorderStyle = DataGridViewCellBorderStyle.None,
             ColumnHeadersVisible = false,
             AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells,
+            // The whole editor types like a form: the instant the bar lands on a cell
+            // (tag / indicators / code / value) it is in edit mode and accepts typing —
+            // no click-to-select, no F2, no placeholder to fight. This is the single
+            // general rule that replaces the old per-cell BeginEdit choreography.
+            EditMode = DataGridViewEditMode.EditOnEnter,
         };
         _viewer.CellEndEdit += ViewerCellEndEdit;
         _viewer.EditingControlShowing += ViewerEditingControlShowing;
@@ -1017,14 +1032,14 @@ public sealed class MainForm : Form
         _resultsList.Columns.Clear();
         if (@base == "AUT")
         {
-            _resultsList.Columns.Add("Acc. No.", 70);
+            _resultsList.Columns.Add("aut-000", 70);
             _resultsList.Columns.Add("Classification", 110);
             _resultsList.Columns.Add("Heading", 300);
             _resultsList.Columns.Add("Source", 220);
         }
         else
         {
-            _resultsList.Columns.Add("001", 70);
+            _resultsList.Columns.Add("bib-000", 70);
             _resultsList.Columns.Add("Title", 300);
             _resultsList.Columns.Add("Author", 180);
             _resultsList.Columns.Add("Year", 50);
@@ -1371,61 +1386,80 @@ public sealed class MainForm : Form
         }
     }
 
-    /// <summary>Caps the editing box by column to the fixed MARC widths: a tag
-    /// is 3 characters, indicators 2, a subfield code 1. Any characters are
-    /// allowed within that width (dumb editor) — only the length is fixed. The
-    /// grid reuses one editing control across cells, so this is set every time.</summary>
+    /// <summary>Sets up the editing control every time a cell opens (the grid reuses
+    /// one control across cells). Two jobs: cap the width to the fixed MARC sizes
+    /// (tag 3 / indicators 2 / code 1; value unlimited), and position the selection.
+    ///
+    /// The selection is set on a <see cref="Control.BeginInvoke(Delegate)"/> — i.e.
+    /// AFTER the grid has finished loading the cell's text into the control. Because
+    /// the grid is <c>EditOnEnter</c>, editing begins when the cell is ENTERED, not
+    /// when a key is pressed, so this deferred call always runs before the user's
+    /// first keystroke — no race (the old code's race was a deferred SelectAll fired
+    /// while editing was STARTED by that keystroke). Doing it deferred is what makes
+    /// it reliable: hanging it on TextChanged missed the case where you re-enter a
+    /// cell whose value equals the reused control's text (no change → no event → the
+    /// full placeholder stayed unselected → every keystroke overflowed → the ding).</summary>
     private void ViewerEditingControlShowing(object? sender, DataGridViewEditingControlShowingEventArgs e)
     {
         if (e.Control is not TextBox tb) return;
         string? col = _viewer.CurrentCell?.OwningColumn.Name;
-        tb.MaxLength = col switch
-        {
-            "tag" => 3,
-            "ind" => 2,
-            "code" => 1,
-            _ => 0, // 0 = unlimited (value and control-data cells)
-        };
-
-        // Prime the editing box the instant the grid populates its text — which
-        // happens SYNCHRONOUSLY inside BeginEdit, before any user keystroke can
-        // reach the control. This is what makes it race-free: the old code
-        // deferred a SelectAll with BeginInvoke, so a fast first keystroke into a
-        // brand-new tag/indicators/code was clobbered by the late SelectAll —
-        // "you type the first digit and it gets deleted" (user report, tasks
-        // 11-13). PrimeEditingBox is a single persistent handler (re-subscribed
-        // once per edit), so the reused editing control never accumulates
-        // stale handlers.
         _editCol = col;
-        tb.TextChanged -= PrimeEditingBox;
-        tb.TextChanged += PrimeEditingBox;
-    }
+        tb.MaxLength = col switch { "tag" => 3, "ind" => 2, "code" => 1, _ => 0 };
 
-    /// <summary>Fired the moment the grid sets the editing box's text. Clears a
-    /// brand-new field's invisible placeholder (which otherwise fills a
-    /// fixed-width micro-cell to its max length and eats the first keystroke) and
-    /// drops the caret at the end with nothing selected — the record reads and
-    /// types like a plain text editor.</summary>
-    private void PrimeEditingBox(object? sender, EventArgs e)
-    {
-        if (sender is not TextBox tb) return;
-        tb.TextChanged -= PrimeEditingBox; // one-shot; setting Text below won't re-enter
-        string col = _editCol ?? "";
         bool micro = col is "tag" or "ind" or "code";
-        if (micro && IsPlaceholderCell(col, tb.Text)) tb.Text = "";
-        tb.SelectionStart = tb.Text.Length;
-        tb.SelectionLength = 0;
+        bool caretStart = _caretAtStartNextEdit;
+        _caretAtStartNextEdit = false;
+        tb.TextChanged -= MicroAdvance; // drop any hand-off handler left on the reused control
+
+        BeginInvoke(() =>
+        {
+            if (tb.IsDisposed) return;
+            if (micro)
+            {
+                // Select the whole 1-3 char content (placeholder or real) so the first
+                // keystroke REPLACES it instead of overflowing the width and dinging.
+                tb.SelectAll();
+                // From here on, real typing that fills the cell hands off to the next.
+                if (col is "ind" or "code") { tb.TextChanged -= MicroAdvance; tb.TextChanged += MicroAdvance; }
+            }
+            else
+            {
+                // Value / control-data: caret at the end, or at the START on Insert (#3).
+                tb.SelectionStart = caretStart ? 0 : tb.TextLength;
+                tb.SelectionLength = 0;
+            }
+        });
     }
 
-    /// <summary>A micro-cell holding only its blank placeholder: an unwritten tag
-    /// ("   " / ""), a codeless subfield (""), or blank indicators ("__").</summary>
-    private static bool IsPlaceholderCell(string column, string text) => column switch
+    /// <summary>Once an indicators (2) or subfield-code (1) cell is filled to its
+    /// width by typing, hand focus to the next cell in the tag→ind→code→value flow
+    /// so the cataloguer keeps typing straight into the body — a subfield code is
+    /// always one character, indicators always two, so there is nothing more to type
+    /// there (tasks #8, #9). Only fires on real keystrokes: it is subscribed after
+    /// the box is primed, and setting the code/indicators is a non-structural edit,
+    /// so the row is not rebuilt underneath the hand-off.</summary>
+    private void MicroAdvance(object? sender, EventArgs e)
     {
-        "tag" => text.Trim().Length == 0,
-        "code" => text.Length == 0,
-        "ind" => text.Replace("_", "").Trim().Length == 0,
-        _ => false,
-    };
+        if (sender is not TextBox tb || tb.MaxLength <= 0 || tb.Text.Length < tb.MaxLength) return;
+        string? next = _editCol switch { "ind" => "code", "code" => "value", _ => null };
+        if (next is null) return;
+        // Typing a code onto a subfield-less field CREATES the subfield — a structural
+        // edit that rebuilds the row — so only hand off from a code cell that already
+        // backs a real subfield; there the change is in-place and the row is stable.
+        if (_editCol == "code" && _viewer.CurrentCell?.OwningRow.Tag is DisplayRow r && r.SubfieldIndex < 0) return;
+        tb.TextChanged -= MicroAdvance; // one hand-off per cell
+        int rowIndex = _viewer.CurrentCell?.RowIndex ?? -1;
+        BeginInvoke(() =>
+        {
+            _viewer.EndEdit();
+            if (rowIndex < 0 || rowIndex >= _viewer.Rows.Count) return;
+            var target = _viewer.Rows[rowIndex].Cells[next];
+            if (target.ReadOnly) return;
+            _viewer.CurrentCell = target;
+            _viewer.Focus();
+            _viewer.BeginEdit(false);
+        });
+    }
 
     private static string Caret(string s) => s.Replace(' ', '^');
 
@@ -1474,13 +1508,13 @@ public sealed class MainForm : Form
     /// <summary>Lands the cursor on a field's first row (its tag cell) whatever the
     /// field's shape — the reliable "put me on this field" after a multi-field
     /// delete, where the surviving field may be a data field with subfields.</summary>
-    private void SelectFieldRow(int fieldIndex)
+    private void SelectFieldRow(int fieldIndex, string column = "tag")
     {
         foreach (DataGridViewRow gridRow in _viewer.Rows)
         {
             if (gridRow.Tag is DisplayRow r && r.FieldIndex == fieldIndex)
             {
-                _viewer.CurrentCell = gridRow.Cells["tag"];
+                _viewer.CurrentCell = gridRow.Cells[column];
                 _viewer.Focus();
                 return;
             }
@@ -1497,7 +1531,11 @@ public sealed class MainForm : Form
         if (_viewer.CurrentCell is not { } cell) { SetMessage("Stand on a field first."); return; }
         if (cell.ReadOnly) { SetMessage("Nothing to type here — move to the tag, indicators, code or value."); return; }
         _viewer.Focus();
-        _viewer.BeginEdit(false); // false = caret, not select-all (EditingControlShowing puts it at the end)
+        // Insert on a filled value drops the caret at the START of the text, so the
+        // cataloguer prepends rather than being parked after the last character
+        // (task #3). Micro-cells ignore the flag — they select-all instead.
+        _caretAtStartNextEdit = true;
+        _viewer.BeginEdit(false); // false = caret, not select-all (EditingControlShowing places the caret)
     }
 
     /// <summary>Enter: order the fields (stable sort by tag) and keep the cursor
@@ -1535,8 +1573,15 @@ public sealed class MainForm : Form
         int after = CurrentRef()?.FieldIndex ?? _currentDoc.Record.Fields.Count - 1;
         int at = _currentDoc.InsertBlankFieldAfter(after);
         RenderRecord();
-        SelectCell(at, -1, "tag");
-        _viewer.BeginEdit(false); // caret in the tag cell — start typing at once (task 5)
+        // Enter the tag cell AFTER the grid has finished rebuilding its rows: opening
+        // the editor in the same message as the rebuild left the new field un-typable
+        // until you clicked away and back (tasks #10, #13). SelectFieldRow finds the
+        // new field's first row whatever its shape.
+        BeginInvoke(() =>
+        {
+            SelectFieldRow(at, "tag");
+            _viewer.BeginEdit(false); // placeholder cleared, caret at the start — type at once
+        });
         SetMessage("New field — type its tag, then Tab through indicators, code and value.");
     }
 
@@ -1552,8 +1597,14 @@ public sealed class MainForm : Form
         var (index, error) = _currentDoc.InsertSubfieldAfter(at.FieldIndex, at.SubfieldIndex);
         if (error != null) { SetMessage(error); return; }
         RenderRecord();
-        SelectCell(at.FieldIndex, index, "code");
-        _viewer.BeginEdit(false); // caret in the new subfield code — start typing at once
+        // Defer entering the code cell until the rebuild settles (same timing fix as
+        // NewField). The default ‡a opens selected, so typing "e" rewrites it to ‡e
+        // and then hands off to the body (tasks #8, #13).
+        BeginInvoke(() =>
+        {
+            SelectCell(at.FieldIndex, index, "code");
+            _viewer.BeginEdit(false);
+        });
     }
 
     private void DeleteCurrentField()
@@ -1567,7 +1618,10 @@ public sealed class MainForm : Form
         }
         _currentDoc.DeleteField(at.FieldIndex);
         RenderRecord();
-        SelectCell(Math.Min(at.FieldIndex, _currentDoc.Record.Fields.Count - 1), -1, "tag");
+        // Land on the BODY of the field that shifted up, not its three-digit tag —
+        // the cataloguer is usually reading/editing text, not retagging (task #7).
+        if (_currentDoc.Record.Fields.Count > 0)
+            SelectFieldRow(Math.Min(at.FieldIndex, _currentDoc.Record.Fields.Count - 1), "value");
     }
 
     /// <summary>Ctrl+Shift+F5: delete every field that has a selected cell in one
@@ -1886,6 +1940,27 @@ public sealed class MainForm : Form
         System.Threading.Thread.Sleep(200);
         Cursor.Current = Cursors.Default;
 
+        // Gate on findings BEFORE committing. Errors block outright; warnings no
+        // longer ride silently into the catalogue — they raise a confirmation popup
+        // where a plain Enter pushes anyway and Cancel backs out (task #11).
+        var pre = new PushService(_repo).Check(doc.Stored, profile);
+        if (pre.Any(f => f.IsError))
+        {
+            ShowFindings(pre);
+            SetMessage($"{FindingSummary(pre)} — push blocked; nothing was written.");
+            return;
+        }
+        var warns = pre.Where(f => !f.IsError).ToList();
+        if (warns.Count > 0)
+        {
+            ShowFindings(pre);
+            if (!ConfirmPushWithWarnings(warns))
+            {
+                SetMessage($"Push cancelled — {warns.Count} warning(s) to review below.");
+                return;
+            }
+        }
+
         PushResult result;
         try
         {
@@ -1935,6 +2010,20 @@ public sealed class MainForm : Form
         if (warnings > 0) msg += $" {warnings} warning(s) — Ctrl+W to review.";
         if (result.RippledFields > 0) msg += $" Rippled into {result.RippledFields} linked bib field(s).";
         SetMessage(msg + mirrorNote);
+    }
+
+    /// <summary>The Ctrl+L warning gate (task #11): lists the warnings and asks
+    /// whether to push anyway. Yes is the default button, so a plain Enter pushes;
+    /// No/Escape backs out. The findings are already in the list below for detail.</summary>
+    private bool ConfirmPushWithWarnings(IReadOnlyList<ValidationFinding> warnings)
+    {
+        const int shown = 8;
+        string list = string.Join("\n", warnings.Take(shown).Select(w => "•  " + w.Message));
+        if (warnings.Count > shown) list += $"\n…  and {warnings.Count - shown} more (see the list below).";
+        return MessageBox.Show(this,
+            $"This record has {warnings.Count} warning(s):\n\n{list}\n\nPush anyway?",
+            "Warnings — Push?", MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+            MessageBoxDefaultButton.Button1) == DialogResult.Yes;
     }
 
     /// <summary>Fills and shows the findings list (errors first), or hides it when

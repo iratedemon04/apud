@@ -16,6 +16,7 @@ public enum SearchScope
     Notes,
     CallNumber,
     Isbn,
+    Local9xx,
     // AUT — one per 1XX heading type (a 130 lookup is nothing like a 100 lookup)
     HeadingPersonal,
     HeadingCorporate,

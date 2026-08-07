@@ -28,7 +28,7 @@ internal static class FtsIndexer
     {
         "control_number",
         // BIB
-        "title", "author", "subjects", "series", "publisher", "notes", "callnumber", "identifier",
+        "title", "author", "subjects", "series", "publisher", "notes", "callnumber", "identifier", "local",
         // AUT — one column per 1XX heading type, plus tracings and source notes
         "h_personal", "h_corporate", "h_meeting", "h_uniform", "h_topical", "h_geographic", "h_genre",
         "variant", "related", "sources",
@@ -132,6 +132,7 @@ internal static class FtsIndexer
         else if (tag[0] is '1' or '7') cols["author"].Add(text);
         else if (tag[0] == '6') cols["subjects"].Add(text);
         else if (tag[0] == '5') cols["notes"].Add(text);
+        else if (tag[0] == '9') cols["local"].Add(text);   // 9XX local/institution-defined fields
 
         if (IsSeriesTag(tag)) cols["series"].Add(text);
         else if (tag is "260" or "264") { var pub = SubfieldText(packed, 'b'); if (pub.Length > 0) cols["publisher"].Add(pub); }

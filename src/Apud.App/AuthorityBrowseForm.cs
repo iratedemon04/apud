@@ -98,6 +98,16 @@ public sealed class AuthorityBrowseForm : Form
         Fill(initial);
     }
 
+    /// <summary>Land keyboard focus on the list the moment the popup is shown, so
+    /// the arrow keys scroll the headings immediately — without this, focus sits in
+    /// the position box and the cataloguer has to click the list first (user note
+    /// 2026-08-05, #12). Repositioning is still one Tab (or a click) away.</summary>
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        if (_list.Items.Count > 0) _list.Focus();
+    }
+
     private void Reposition(string text) => Fill(_reposition(text));
 
     /// <summary>Redraws the list from a positioned window and lands the selection

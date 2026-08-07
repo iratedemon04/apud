@@ -67,18 +67,19 @@ public static class Headings
     }
 
     /// <summary>
-    /// A field's heading as one readable line: its subfield values joined with a
-    /// space. Deliberately plain — Apud does not invent MARC display punctuation
-    /// (the "-- " between subject subdivisions, etc.); the cataloguer's own data
-    /// carries whatever punctuation it carries, and the normalized key (not this
-    /// string) is what browse compares against. Relator subfields ($e author,
-    /// $4 aut) are left out of the heading text — they are cataloguing role, not
+    /// A field's heading as one readable line: its subfield values joined with "--",
+    /// so an authority's subdivisions read the familiar way ("Abogados--México"
+    /// rather than "Abogados México"; user note 2026-08-05, #12, matching the
+    /// two-dash separator already used in the result list). The separator is display
+    /// only — every comparison goes through <see cref="HeadingNormalization"/>, which
+    /// flattens "--" and spaces alike, so matching is unaffected. Relator/control
+    /// subfields ($e, $0/$2/$3/$4/$6/$8) are left out — role and linkage data, not
     /// part of the name being browsed.
     /// </summary>
     public static string HeadingText(MarcField field)
     {
         if (field.IsControl) return (field.ControlData ?? "").Trim();
-        return string.Join(" ", field.Subfields
+        return string.Join("--", field.Subfields
             .Where(s => !IsRelator(s.Code))
             .Select(s => s.Value.Trim())
             .Where(v => v.Length > 0));
@@ -108,5 +109,12 @@ public static class Headings
         return true;
     }
 
-    private static bool IsRelator(char code) => code is 'e' or '4';
+    /// <summary>Subfields that are NOT part of the heading being browsed/linked and
+    /// so are ignored for both the display text and the normalized comparison key:
+    /// the relator term ($e author/editor — a cataloguing role, not a name) plus the
+    /// control subfields $0 (authority record number), $2 (source), $3 (materials
+    /// specified), $4 (relationship), $6 (linkage) and $8 (field link/sequence).
+    /// Leaving these out means an authorized "Smith, John" links a bib field however
+    /// its $0/$4/etc happen to be filled (user note 2026-08-05, #14).</summary>
+    private static bool IsRelator(char code) => code is 'e' or '0' or '2' or '3' or '4' or '6' or '8';
 }

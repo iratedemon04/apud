@@ -74,6 +74,20 @@ public class FtsSearchTests : IDisposable
     }
 
     [Fact]
+    public void Local_9xx_fields_are_searchable_under_the_local_scope()
+    {
+        // A 9XX local/institution-defined field indexes into the "local" scope so a
+        // cataloguer can search it from the BIB dropdown (task #4).
+        var rec = InsertPushed(
+            "=LDR  00000nam a2200000 i 4500\n=001  1\n=245  10$aObra\n" +
+            "=990  \\\\$aColección Especial Fondo Reservado\n");
+
+        Assert.Contains(rec.Id, Repo.Search("BIB", "reservado", SearchScope.Local9xx));
+        Assert.Contains(rec.Id, Repo.Search("BIB", "reservado", SearchScope.All));
+        Assert.Empty(Repo.Search("BIB", "reservado", SearchScope.Title));
+    }
+
+    [Fact]
     public void Editing_a_pushed_record_reindexes_it()
     {
         var rec = InsertPushed(Bib("1", "Título viejo"));

@@ -35,18 +35,25 @@ public sealed class FixedFieldForm : Form
         var mono = new Font("Consolas", 9.75f);
         int half = (layout.Positions.Count + 1) / 2;
 
+        // The grid AUTO-SIZES to its content and lives inside a separate scroll
+        // panel (below). Two reasons, both behind the "positions stranded below the
+        // fold / must scroll" report (#2): (a) every column is AutoSize, so a long
+        // position label ("Type of date/Publication status") keeps its own width and
+        // NEVER wraps to a second line — wrapping was what made rows tall and pushed
+        // later positions down; (b) an AutoSize grid reports its true PreferredSize,
+        // unlike the old AutoScroll grid whose PreferredSize was just the viewport,
+        // so the window can actually be grown to fit.
         var grid = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill,
+            Location = new Point(0, 0),
             ColumnCount = 6,
-            AutoScroll = true,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
             Padding = new Padding(8),
         };
-        // Two mirrored triplets: label | box | meaning.
-        foreach (var pct in new[] { 34f, 0f, 66f, 34f, 0f, 66f })
-            grid.ColumnStyles.Add(pct == 0f
-                ? new ColumnStyle(SizeType.AutoSize)
-                : new ColumnStyle(SizeType.Percent, pct));
+        // Two mirrored triplets: label | box | meaning, each sized to its content.
+        for (int c = 0; c < 6; c++)
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
         for (int i = 0; i < layout.Positions.Count; i++)
         {
@@ -108,18 +115,24 @@ public sealed class FixedFieldForm : Form
         buttons.Controls.Add(cancel);
         buttons.Controls.Add(ok);
 
-        Controls.Add(grid);
+        // The grid sits inside a scroll panel that only ever scrolls if the layout is
+        // taller than the (capped) window — normally it isn't, so nothing scrolls.
+        var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+        scroller.Controls.Add(grid);
+
+        Controls.Add(scroller);
         Controls.Add(buttons);
         AcceptButton = ok;
         CancelButton = cancel;
 
-        // Grow the window to fit every position, so none is stranded below the fold
-        // and forcing a scroll (task 6). Capped to the screen; AutoScroll still
-        // covers the rare layout taller than that.
-        var preferred = grid.GetPreferredSize(new Size(ClientSize.Width, 0));
-        int wanted = preferred.Height + buttons.Height;
-        int cap = (int)(Screen.PrimaryScreen!.WorkingArea.Height * 0.85);
-        ClientSize = new Size(ClientSize.Width, Math.Clamp(wanted, MinimumSize.Height, cap));
+        // Grow the window to the grid's REAL content size (accurate now that the grid
+        // AutoSizes and no label wraps), so every position is visible without scrolling
+        // — the LDR/10 and 008/28 stranding (#2). Capped to 90% of the screen.
+        var work = Screen.FromControl(this).WorkingArea;
+        var preferred = grid.PreferredSize;
+        ClientSize = new Size(
+            Math.Clamp(preferred.Width, MinimumSize.Width, (int)(work.Width * 0.9)),
+            Math.Clamp(preferred.Height + buttons.Height, MinimumSize.Height, (int)(work.Height * 0.9)));
 
         // Land the cursor on the first editable position.
         ActiveControl = _boxes.FirstOrDefault(b => !b.Pos.Protected).Box;

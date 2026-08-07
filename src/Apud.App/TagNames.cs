@@ -101,7 +101,7 @@ public static class TagNames
         ["043"] = "Geographic Area",
         ["050"] = "LC Call No.",
         ["082"] = "Dewey Class No.",
-        ["083"] = "Dewey Class No.",
+        ["083"] = "Dewey Call No.",
         ["084"] = "Other Class No.",
         ["090"] = "Local Call No.",
         ["100"] = "Main Entry--Pers.",

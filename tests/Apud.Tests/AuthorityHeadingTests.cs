@@ -27,7 +27,7 @@ public class AuthorityHeadingTests
         Assert.Equal(3, entries.Count);
         Assert.Equal(HeadingKind.Authorized, entries[0].Kind);
         Assert.Equal("100", entries[0].Tag);
-        Assert.Equal("Preciado, Amado 1962-", entries[0].Display);
+        Assert.Equal("Preciado, Amado--1962-", entries[0].Display); // subfields shown "--"-joined (task #12)
         Assert.Equal("preciado, amado 1962", entries[0].Normalized);
 
         Assert.Equal(HeadingKind.See, entries[1].Kind);
@@ -42,6 +42,19 @@ public class AuthorityHeadingTests
         var field = Parse("=LDR  00766nam a22002534i 4500\n=700  1\\$aMoreno, Matías$eautor$4aut\n")
             .FieldsWithTag("700").First();
         Assert.Equal("Moreno, Matías", Headings.HeadingText(field));
+    }
+
+    [Fact]
+    public void HeadingText_ignores_control_subfields_for_linkage()
+    {
+        // $0 (auth number), $2 (source), $3, $4, $6 (linkage) and $8 must not become
+        // part of the heading being browsed/linked — otherwise the same name links
+        // differently depending on how those technical subfields are filled (task #14).
+        var field = Parse(
+            "=LDR  00766nam a22002534i 4500\n" +
+            "=650  \\0$aAbogados$xMéxico$0(DE-101)123$2lcsh$6880-04\n")
+            .FieldsWithTag("650").First();
+        Assert.Equal("Abogados--México", Headings.HeadingText(field));
     }
 
     [Fact]

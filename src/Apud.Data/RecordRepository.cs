@@ -391,6 +391,7 @@ public sealed class RecordRepository
             SearchScope.Notes => "notes",
             SearchScope.CallNumber => "callnumber",
             SearchScope.Isbn => "identifier",
+            SearchScope.Local9xx => "local",
             SearchScope.HeadingPersonal => "h_personal",
             SearchScope.HeadingCorporate => "h_corporate",
             SearchScope.HeadingMeeting => "h_meeting",
