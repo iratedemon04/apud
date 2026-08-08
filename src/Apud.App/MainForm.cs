@@ -838,8 +838,12 @@ public sealed class MainForm : Form
         ClearViewer();
         ShowSearchView();
 
+        LoadDraftsIntoSidebar(); // drafts aren't searchable — reopen them so work-in-progress survives a restart
+
         Text = $"Apud — {path}";
-        SetMessage($"Catalogue open — BIB: {_repo.Count("BIB")}, AUT: {_repo.Count("AUT")} record(s).");
+        int drafts = _openList.Items.Count;
+        SetMessage($"Catalogue open — BIB: {_repo.Count("BIB")}, AUT: {_repo.Count("AUT")} record(s)."
+            + (drafts > 0 ? $" {drafts} draft(s) reopened." : ""));
     }
 
     // ---------- base ----------
@@ -1104,14 +1108,38 @@ public sealed class MainForm : Form
     /// switching records, until saved or removed.</summary>
     private void AddToSidebar(EditorDocument doc)
     {
+        _openList.Items.Add(MakeSidebarItem(doc));
+        _openList.SelectedItems.Clear();
+        _openList.Items[_openList.Items.Count - 1].Selected = true; // → ShowSelectedOpenRecord → record view
+    }
+
+    private ListViewItem MakeSidebarItem(EditorDocument doc)
+    {
         var item = new ListViewItem(doc.Stored.Base);
         item.SubItems.Add(AccessionSlot(doc) ?? "");
         item.SubItems.Add(TitleOf(doc.Record));
         item.SubItems.Add(SidebarStatus(doc));
         item.Tag = doc;
-        _openList.Items.Add(item);
-        _openList.SelectedItems.Clear();
-        item.Selected = true; // triggers ShowSelectedOpenRecord → record view
+        return item;
+    }
+
+    /// <summary>Repopulates the sidebar with every draft in the catalogue. Drafts
+    /// are excluded from search, so this is how an unfinished draft survives a close
+    /// + reopen — the working set is restored on catalogue open. Added quietly (no
+    /// selection) so opening a catalogue still lands on the search view, not a record.</summary>
+    private void LoadDraftsIntoSidebar()
+    {
+        if (_repo is null) return;
+        var open = new HashSet<long>();
+        foreach (ListViewItem existing in _openList.Items)
+            if (existing.Tag is EditorDocument d) open.Add(d.Stored.Id);
+
+        foreach (long id in _repo.DraftIds())
+        {
+            if (!open.Add(id)) continue; // already open (e.g. re-open of same catalogue)
+            if (_repo.Load(id) is { } stored)
+                _openList.Items.Add(MakeSidebarItem(new EditorDocument(stored)));
+        }
     }
 
     private void ShowSelectedOpenRecord()

@@ -308,6 +308,22 @@ public sealed class RecordRepository
         return list;
     }
 
+    /// <summary>Ids of every DRAFT record (both bases), ordered by base then
+    /// control number then id. Drafts are excluded from search (they must earn
+    /// pushed status via Ctrl+L), so an unfinished draft would be unreachable
+    /// after a restart — the sidebar reloads them all on catalogue open.</summary>
+    public List<long> DraftIds()
+    {
+        var ids = new List<long>();
+        using var cmd = _db.Connection.CreateCommand();
+        cmd.CommandText =
+            "SELECT id FROM record WHERE status = 'draft' " +
+            "ORDER BY base, CAST(control_number AS INTEGER), id;";
+        using var r = cmd.ExecuteReader();
+        while (r.Read()) ids.Add(r.GetInt64(0));
+        return ids;
+    }
+
     /// <summary>Count of records in a base — a cheap COUNT(*), not a full materialisation.</summary>
     public int Count(string @base)
     {

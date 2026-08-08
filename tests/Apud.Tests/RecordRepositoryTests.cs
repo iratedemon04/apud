@@ -91,6 +91,22 @@ public class RecordRepositoryTests : IDisposable
     }
 
     [Fact]
+    public void DraftIds_returns_only_drafts_across_both_bases()
+    {
+        var pushed = new StoredRecord("BIB", Parse(Monograph)) { Status = RecordStatus.Pushed };
+        Repo.Insert(pushed);
+        var bibDraft = new StoredRecord("BIB", Parse(Monograph.Replace("=001  1\n", ""))); // a draft usually has no 001 yet
+        Repo.SaveDraft(bibDraft);
+        var autDraft = new StoredRecord("AUT", Parse("=LDR  00000nz  a2200000n  4500\n=100  1\\$aMoreno, Matías\n"));
+        Repo.SaveDraft(autDraft);
+
+        var ids = Repo.DraftIds();
+
+        Assert.Equal(new[] { autDraft.Id, bibDraft.Id }.OrderBy(x => x), ids.OrderBy(x => x));
+        Assert.DoesNotContain(pushed.Id, ids); // pushed records are not reopened
+    }
+
+    [Fact]
     public void Deleting_a_record_cascades_fields_and_links()
     {
         var stored = new StoredRecord("BIB", Parse(Monograph));
