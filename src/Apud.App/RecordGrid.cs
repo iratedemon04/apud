@@ -60,9 +60,12 @@ public sealed class RecordGrid : Panel
 
     private readonly List<(TextBox Box, BoxSpec Spec)> _boxes = new(); // active boxes, in flow order
     private readonly List<(Control C, BoxPart Part, int Row, bool Wide, bool IsName)> _placements = new();
-    private readonly Dictionary<int, Label> _nameLabels = new(); // fieldIndex -> its maroon label (the gutter)
-    private readonly HashSet<int> _selectedFields = new();
-    private int _anchorField = -1;
+    private readonly Dictionary<int, Label> _nameLabels = new(); // fieldIndex -> its maroon label
+    private readonly HashSet<int> _selectedFields = new();       // multi-field selection for bulk delete
+    private int _anchorField = -1;                               // Shift-click range anchor
+    private int _dragStartField = -1;                            // field the current drag began on
+    private bool _dragArmed;                                     // a plain mouse-down that may become a row drag
+    private bool _dragging;                                      // a row-select drag is in progress
     private int _rowCount;
 
     private EditorDocument? _doc;
@@ -133,7 +136,6 @@ public sealed class RecordGrid : Panel
                         var lbl = AcquireLabel(ref label);
                         lbl.Text = spec.Name;
                         lbl.Tag = spec.FieldIndex;
-                        lbl.Cursor = spec.FieldIndex >= 0 ? Cursors.Hand : Cursors.Default;
                         lbl.BackColor = SystemColors.Window;
                         if (spec.FieldIndex >= 0) _nameLabels[spec.FieldIndex] = lbl;
                         _placements.Add((lbl, BoxPart.Leader, spec.Row, false, true));
@@ -196,7 +198,9 @@ public sealed class RecordGrid : Panel
             Padding = new Padding(0),
             TextAlign = ContentAlignment.TopLeft,
         };
-        lbl.Click += (_, _) => { if (lbl.Tag is int fi && fi >= 0) OnGutterClick(fi); };
+        lbl.MouseDown += (_, e) => OnSelDown(lbl, e);
+        lbl.MouseMove += (_, e) => OnSelMove(lbl, e);
+        lbl.MouseUp += (_, _) => OnSelUp();
         _labelPool.Add(lbl);
         _body.Controls.Add(lbl);
         used++;
@@ -216,6 +220,9 @@ public sealed class RecordGrid : Panel
         box.Enter += (_, _) => OnBoxEnter(box);
         box.Leave += (_, _) => OnBoxLeave(box);
         box.TextChanged += (_, _) => OnBoxTextChanged(box);
+        box.MouseDown += (_, e) => OnSelDown(box, e);
+        box.MouseMove += (_, e) => OnSelMove(box, e);
+        box.MouseUp += (_, _) => OnSelUp();
         return box;
     }
 
@@ -315,7 +322,7 @@ public sealed class RecordGrid : Panel
     private void OnBoxEnter(TextBox box)
     {
         _focused = box;
-        box.BackColor = ApudBlue;
+        RecolorAll();
         // Select the whole 1-3 char content so the first keystroke REPLACES it (a
         // micro box is always full — "__"/"10"/a code — so otherwise the caret sits
         // at the end of a full box and typing dings). Deferred so it survives a mouse
@@ -326,9 +333,9 @@ public sealed class RecordGrid : Panel
 
     private void OnBoxLeave(TextBox box)
     {
-        box.BackColor = SystemColors.Window;
         if (!_suspendCommit) CommitInternal(box);
         if (ReferenceEquals(_focused, box)) _focused = null;
+        RecolorAll();
     }
 
     private void OnBoxTextChanged(TextBox box)
@@ -420,8 +427,8 @@ public sealed class RecordGrid : Panel
         // null and the next command ("stand in a field first") fails. This is what
         // lets you spam Ctrl+F5 down a record, or delete a gutter selection.
         _focused = box;
-        box.BackColor = ApudBlue;
         if (!box.Focused) box.Focus();
+        RecolorAll();
         if (box.Tag is BoxSpec { Part: BoxPart.Tag or BoxPart.Ind or BoxPart.Code })
             BeginInvoke(() => { if (box.Focused && !box.IsDisposed) box.SelectAll(); });
     }
@@ -464,41 +471,89 @@ public sealed class RecordGrid : Panel
         }
     }
 
-    // ---------- multi-field selection (the gutter) ----------
+    // ---------- multi-field selection (drag / Shift / Ctrl from anywhere) ----------
 
-    /// <summary>Field indices the user has gutter-selected (by clicking the maroon
-    /// name column) for a one-step multi-field delete. Empty when nothing is
-    /// selected.</summary>
+    /// <summary>Field indices the user has selected for a one-step multi-field
+    /// delete. Built by dragging the mouse down/up across rows (from any box), or
+    /// Shift/Ctrl-clicking a field. Empty when nothing is selected (the host then
+    /// deletes just the field under the caret).</summary>
     public IReadOnlyCollection<int> SelectedFieldIndices => _selectedFields;
 
-    private void OnGutterClick(int fieldIndex)
+    private static int FieldOf(Control c) =>
+        c is TextBox { Tag: BoxSpec s } ? s.FieldIndex : c is Label { Tag: int fi } ? fi : -1;
+
+    private void OnSelDown(Control c, MouseEventArgs e)
     {
+        if (e.Button != MouseButtons.Left) return;
+        int field = FieldOf(c);
         var mods = ModifierKeys;
-        if ((mods & Keys.Shift) != 0 && _anchorField >= 0)
+
+        if ((mods & Keys.Control) != 0) // toggle one field in/out
         {
-            _selectedFields.Clear();
-            for (int i = Math.Min(_anchorField, fieldIndex); i <= Math.Max(_anchorField, fieldIndex); i++)
-                _selectedFields.Add(i);
+            if (field >= 0) { if (!_selectedFields.Add(field)) _selectedFields.Remove(field); _anchorField = field; }
+            _dragArmed = false; RecolorAll(); return;
         }
-        else if ((mods & Keys.Control) != 0)
+        if ((mods & Keys.Shift) != 0 && _anchorField >= 0) // extend a range
         {
-            if (!_selectedFields.Add(fieldIndex)) _selectedFields.Remove(fieldIndex);
-            _anchorField = fieldIndex;
+            SelectRange(_anchorField, field); _dragArmed = false; RecolorAll(); return;
         }
-        else
-        {
-            _selectedFields.Clear();
-            _selectedFields.Add(fieldIndex);
-            _anchorField = fieldIndex;
-            FocusField(fieldIndex, BoxPart.Tag);
-        }
-        ApplySelectionHighlight();
+
+        // Plain press: this is an edit click, so clear any selection — but ARM a
+        // drag. If the mouse then moves into another row it becomes a row-select
+        // (a drag that stays in this box is just normal text selection).
+        _selectedFields.Clear();
+        _dragStartField = field;
+        if (field >= 0) _anchorField = field;
+        _dragArmed = field >= 0;
+        _dragging = false;
+        RecolorAll();
     }
 
-    private void ApplySelectionHighlight()
+    private void OnSelMove(Control c, MouseEventArgs e)
     {
-        foreach (var (fi, label) in _nameLabels)
-            label.BackColor = _selectedFields.Contains(fi) ? ApudBlue : SystemColors.Window;
+        if (!_dragArmed || (MouseButtons & MouseButtons.Left) == 0) return;
+        int cur = FieldAtY(_body.PointToClient(c.PointToScreen(e.Location)).Y);
+        if (cur < 0) return;
+        if (_dragging || cur != _dragStartField)
+        {
+            _dragging = true;
+            if (c is TextBox tb) tb.SelectionLength = 0; // suppress the origin box's own text-drag
+            SelectRange(_dragStartField, cur);
+            RecolorAll();
+        }
+    }
+
+    private void OnSelUp() { _dragArmed = false; _dragging = false; }
+
+    private void SelectRange(int a, int b)
+    {
+        _selectedFields.Clear();
+        if (a < 0) a = 0;
+        if (b < 0) b = 0;
+        for (int i = Math.Min(a, b); i <= Math.Max(a, b); i++)
+            if (i >= 0) _selectedFields.Add(i);
+    }
+
+    /// <summary>Which field's row contains the given Y (in _body coords); clamps to
+    /// the first/last field when a drag runs past the ends.</summary>
+    private int FieldAtY(int y)
+    {
+        if (_boxes.Count == 0) return -1;
+        foreach (var (box, spec) in _boxes)
+            if (y >= box.Top && y < box.Bottom) return spec.FieldIndex;
+        return y < _boxes[0].Box.Top ? _boxes[0].Spec.FieldIndex : _boxes[^1].Spec.FieldIndex;
+    }
+
+    /// <summary>A box is tinted apud-blue when it is focused OR its field is
+    /// selected; else white. The name label follows its field's selection.</summary>
+    private void RecolorAll()
+    {
+        if (_suspendCommit) return;
+        foreach (var (box, spec) in _boxes)
+            box.BackColor = ReferenceEquals(box, _focused) || _selectedFields.Contains(spec.FieldIndex)
+                ? ApudBlue : SystemColors.Window;
+        foreach (var (fi, lbl) in _nameLabels)
+            lbl.BackColor = _selectedFields.Contains(fi) ? ApudBlue : SystemColors.Window;
     }
 
     /// <summary>The field/subfield the caret is on, in model indices.</summary>

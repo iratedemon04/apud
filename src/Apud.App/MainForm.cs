@@ -1331,52 +1331,35 @@ public sealed class MainForm : Form
     {
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
         _grid.CommitFocused();
-        if (CurrentRef() is not { } at || at.FieldIndex < 0)
+
+        // If fields are selected (drag across rows, or Shift/Ctrl-click from any
+        // box), delete all of them in one undoable step; otherwise delete the field
+        // under the caret. The leader is never included.
+        var selected = _grid.SelectedFieldIndices.Where(i => i >= 0).Distinct().OrderBy(i => i).ToList();
+        if (selected.Count == 0 && CurrentRef() is { FieldIndex: >= 0 } at)
+            selected.Add(at.FieldIndex);
+
+        if (selected.Count == 0)
         {
-            SetMessage("Stand in a field first (the leader cannot be deleted).");
+            SetMessage("Stand in a field, or drag across fields to select several (the leader cannot be deleted).");
             return;
         }
-        _currentDoc.DeleteField(at.FieldIndex);
-        RenderRecord();
-        // Land on the BODY of the field that shifted up, not its three-digit tag —
-        // the cataloguer is usually reading/editing text, not retagging (task #7).
-        if (_currentDoc.Record.Fields.Count > 0)
-            SelectFieldRow(Math.Min(at.FieldIndex, _currentDoc.Record.Fields.Count - 1), "value");
-    }
 
-    /// <summary>Ctrl+Shift+F5: delete every gutter-selected field in one undoable
-    /// step — the bulk prune for a pasted-in record (user request 2026-08-01).
-    /// Fields are gutter-selected by clicking the maroon name column (Shift/Ctrl to
-    /// extend); with nothing selected it falls back to the field under the caret, so
-    /// it still behaves like Ctrl+F5. The leader is never touched.</summary>
-    private void DeleteSelectedFields()
-    {
-        if (_currentDoc is null) { SetMessage("No record on screen."); return; }
-        _grid.CommitFocused();
-
-        var indices = _grid.SelectedFieldIndices.Where(i => i >= 0).Distinct().ToList();
-        if (indices.Count == 0 && CurrentRef() is { FieldIndex: >= 0 } at)
-            indices.Add(at.FieldIndex); // nothing gutter-selected: prune the current field
-
-        if (indices.Count == 0)
-        {
-            SetMessage("Click a field's name to select it (Shift/Ctrl-click for several), then delete.");
-            return;
-        }
-        if (indices.Count > 1 && MessageBox.Show(this,
-                $"Delete {indices.Count} selected fields?",
-                "Delete Fields", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
-            return;
-
-        int land = indices.Min(); // the field the survivors shift up into
-        _currentDoc.DeleteFields(indices);
+        // No confirmation dialog (and so no system ding): a delete is one Ctrl+Z away.
+        int land = selected[0]; // survivors shift up into the topmost deleted slot
+        _currentDoc.DeleteFields(selected);
         RenderRecord();
         UpdateSidebarItem(_currentDoc);
         UpdateHeader();
+        // Land on the BODY of the field that shifted up (task #7).
         if (_currentDoc.Record.Fields.Count > 0)
-            SelectFieldRow(Math.Min(land, _currentDoc.Record.Fields.Count - 1));
-        SetMessage($"Deleted {indices.Count} field(s).");
+            SelectFieldRow(Math.Min(land, _currentDoc.Record.Fields.Count - 1), "value");
+        SetMessage(selected.Count > 1 ? $"Deleted {selected.Count} fields." : "Field deleted.");
     }
+
+    /// <summary>Ctrl+Shift+F5: same selection-aware delete as Ctrl+F5, kept as a
+    /// separate binding for the bulk prune.</summary>
+    private void DeleteSelectedFields() => DeleteCurrentField();
 
     private void DeleteCurrentSubfield()
     {
@@ -2220,6 +2203,7 @@ public sealed class MainForm : Form
             _grid.CommitFocused();
             var copy = EditorDocument.CopyWithout001(_currentDoc.Record);
             AddToSidebar(new EditorDocument(new StoredRecord(_currentDoc.Stored.Base, copy), dirty: true));
+            _grid.FocusElement(-1, -1, BoxPart.Leader); // start in the leader, no mouse needed
             SetMessage("Copied as a new draft — 001 will be assigned at push.");
             return;
         }
@@ -2248,6 +2232,7 @@ public sealed class MainForm : Form
         var record = EditorDocument.CopyWithout001(read.Records[0]);
         string @base = record.Kind == Marc.Core.RecordKind.Authority ? "AUT" : "BIB";
         AddToSidebar(new EditorDocument(new StoredRecord(@base, record), dirty: true));
+        _grid.FocusElement(-1, -1, BoxPart.Leader); // start in the leader, no mouse needed
         SetMessage($"New {@base} record from {Path.GetFileNameWithoutExtension(picker.SelectedPath)}.");
     }
 
