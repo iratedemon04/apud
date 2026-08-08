@@ -44,7 +44,7 @@ public sealed class MainForm : Form
     private const int ListPageSize = 1000;
 
     private readonly Label _recordHeader;
-    private readonly DataGridView _viewer;
+    private readonly RecordGrid _grid;             // textbox-grid editor (replaces the DataGridView)
     private readonly ListView _findings;          // Ctrl+W/Ctrl+L output, click to jump
 
     // The scope dropdown is base-aware: BIB and AUT index completely different
@@ -108,10 +108,6 @@ public sealed class MainForm : Form
     private string? _catalogPath;          // the open .db path; MARC_OUT sits beside it
     private string _currentBase = "BIB"; // the single source of truth for the active base (menu + Ctrl+B drive it)
     private EditorDocument? _currentDoc; // the record showing in the editor
-    private bool _rendering;             // grid is being rebuilt; ignore its edit events
-    private bool _resumeEditAfterRender; // a structural edit re-rendered mid-typing; drop back into the cell
-    private string? _editCol;            // column name of the cell currently being edited (for PrimeEditingBox)
-    private bool _caretAtStartNextEdit;  // next edit drops the caret at the START of the value (Insert, task #3)
     private MarcField? _fieldClipboard;      // Ctrl+T copy field / Alt+T paste
     private MarcSubfield? _subfieldClipboard; // Ctrl+S copy subfield / Alt+S paste
     private int _pushesSinceSync;            // records pushed since the last server backup
@@ -428,48 +424,16 @@ public sealed class MainForm : Form
         // bold black data text.
         // Module 6: the same page of text is now the editor — in-place edits on
         // the cells themselves, never separate input boxes (user decision).
-        _viewer = new DataGridView
+        _grid = new RecordGrid();
+        // Each committed edit refreshes the header/sidebar/dirty marker; a refused
+        // edit (bad leader length, control/data boundary cross) shows its note.
+        _grid.EditCommitted += (_, _) =>
         {
-            Dock = DockStyle.Fill,
-            ReadOnly = false,
-            AllowUserToAddRows = false,
-            AllowUserToDeleteRows = false,
-            AllowUserToResizeRows = false,
-            RowHeadersVisible = false,
-            SelectionMode = DataGridViewSelectionMode.CellSelect,
-            // Multi-select so a range of fields can be picked (Shift/Ctrl-click or
-            // Shift+arrows) and deleted at once — e.g. pruning a pasted-in record
-            // down to a new authority (user request 2026-08-01). Single-cell
-            // editing is unaffected.
-            MultiSelect = true,
-            BackgroundColor = SystemColors.Window,
-            BorderStyle = BorderStyle.None,
-            CellBorderStyle = DataGridViewCellBorderStyle.None,
-            ColumnHeadersVisible = false,
-            AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells,
-            // The whole editor types like a form: the instant the bar lands on a cell
-            // (tag / indicators / code / value) it is in edit mode and accepts typing —
-            // no click-to-select, no F2, no placeholder to fight. This is the single
-            // general rule that replaces the old per-cell BeginEdit choreography.
-            EditMode = DataGridViewEditMode.EditOnEnter,
+            if (_currentDoc is null) return;
+            UpdateHeader();
+            UpdateSidebarItem(_currentDoc);
         };
-        _viewer.CellEndEdit += ViewerCellEndEdit;
-        _viewer.EditingControlShowing += ViewerEditingControlShowing;
-        _viewer.DefaultCellStyle.Padding = new Padding(0);
-        _viewer.DefaultCellStyle.SelectionBackColor = Color.FromArgb(225, 238, 250);
-        _viewer.DefaultCellStyle.SelectionForeColor = Color.Black;
-        _viewer.RowTemplate.Height = 17;
-
-        var mono = new Font("Consolas", 9.75f);
-        _viewer.Columns.Add(NewColumn("name", 140, italic: true, color: Color.Maroon,
-            font: new Font("Segoe UI", 8.25f), readOnly: true));
-        _viewer.Columns.Add(NewColumn("tag", 42, font: mono, bold: true, underline: true, color: Color.Gray));
-        _viewer.Columns.Add(NewColumn("ind", 34, font: mono));
-        _viewer.Columns.Add(NewColumn("code", 26, font: mono, bold: true, underline: true));
-        var value = NewColumn("value", 200, font: mono, bold: true);
-        value.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
-        value.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
-        _viewer.Columns.Add(value);
+        _grid.Message += SetMessage;
 
         // Validation output (Module 9): a list docked below the record, hidden
         // until Ctrl+W/Ctrl+L produces findings. Clicking or pressing Enter on a
@@ -493,7 +457,7 @@ public sealed class MainForm : Form
         _recordView = new Panel { Dock = DockStyle.Fill, Visible = false };
         // Add order sets docking: viewer fills, findings pins to the bottom,
         // header pins to the top.
-        _recordView.Controls.Add(_viewer);
+        _recordView.Controls.Add(_grid);
         _recordView.Controls.Add(_findings);
         _recordView.Controls.Add(_recordHeader);
 
@@ -604,7 +568,7 @@ public sealed class MainForm : Form
         if (!_fieldHelp.Visible) _fieldHelp.Show(this);
         else _fieldHelp.BringToFront();
         // Keep the caret in the editor — help is a glance, not a focus change.
-        _viewer.Focus();
+        _grid.Focus();
     }
 
     /// <summary>Help → Getting Started: the terse three-step intro. Reachable any
@@ -721,7 +685,7 @@ public sealed class MainForm : Form
         // you were on (tasks 8, 17). Gated to the record grid so Enter in the
         // findings list / search box is untouched.
         if (ctx == CommandContext.Editor && _currentDoc is not null
-            && (_viewer.Focused || _viewer.IsCurrentCellInEditMode)
+            && _grid.EditorHasFocus
             && _keymap.Lookup(keyData, ctx) == "field.order")
         {
             OrderFieldsCommand();
@@ -743,8 +707,9 @@ public sealed class MainForm : Form
         if ((keyData & (Keys.Control | Keys.Alt)) != 0) return true;
         var code = keyData & Keys.KeyCode;
         if (code is >= Keys.F1 and <= Keys.F24) return true;
-        return FocusedControl() is not (TextBoxBase or ComboBox)
-               && !_viewer.IsCurrentCellInEditMode; // a grid cell being typed in is a text box too
+        // A grid box is a real TextBox, so the TextBoxBase test already routes plain
+        // keystrokes to typing and modified/F-keys to commands.
+        return FocusedControl() is not (TextBoxBase or ComboBox);
     }
 
     private Control? FocusedControl()
@@ -753,25 +718,6 @@ public sealed class MainForm : Form
         while (c is ContainerControl container && container.ActiveControl != null)
             c = container.ActiveControl;
         return c;
-    }
-
-    private static DataGridViewTextBoxColumn NewColumn(
-        string name, int width, bool italic = false, bool bold = false, bool underline = false,
-        Color? color = null, Font? font = null, bool readOnly = false)
-    {
-        var col = new DataGridViewTextBoxColumn { Name = name, Width = width, ReadOnly = readOnly };
-        var style = col.DefaultCellStyle;
-        if (color is Color c)
-        {
-            style.ForeColor = c;
-            style.SelectionForeColor = c; // colored columns keep their color when selected
-        }
-        Font baseFont = font ?? new Font("Segoe UI", 9f);
-        var flags = (italic ? FontStyle.Italic : FontStyle.Regular)
-                  | (bold ? FontStyle.Bold : FontStyle.Regular)
-                  | (underline ? FontStyle.Underline : FontStyle.Regular);
-        style.Font = new Font(baseFont, flags);
-        return col;
     }
 
     // ---------- view switching ----------
@@ -1202,7 +1148,7 @@ public sealed class MainForm : Form
     {
         _currentDoc = null;
         _recordHeader.Text = "";
-        _viewer.Rows.Clear();
+        _grid.Clear();
     }
 
     private static string TitleOf(Marc.Core.MarcRecord record)
@@ -1231,63 +1177,18 @@ public sealed class MainForm : Form
 
     // ---------- editor (Module 6 steps 3-6) ----------
 
-    /// <summary>Redraws the grid and header from the current document. When
-    /// <paramref name="preservePosition"/> is set the cursor stays on the same
-    /// field/subfield/column across the rebuild — so a structural edit made while
-    /// typing (retag, first subfield) does not fling the cursor to the top and
-    /// force a click (user, 2026-08-01). Switching to a different record passes
-    /// false, since the old position means nothing in the new record.</summary>
+    /// <summary>Redraws the editor from the current document through the textbox
+    /// grid. <paramref name="preservePosition"/> keeps the caret on the same
+    /// element across the rebuild (a structural edit made while typing); switching
+    /// to a different record passes false.</summary>
     private void RenderRecord(bool preservePosition = true)
     {
-        if (_currentDoc is null) { _recordHeader.Text = ""; _viewer.Rows.Clear(); return; }
-        var doc = _currentDoc;
-
-        var keep = preservePosition ? CaptureCell() : null;
-        bool resume = _resumeEditAfterRender && _viewer.ContainsFocus;
-        _resumeEditAfterRender = false;
-
-        _rendering = true;
+        if (_currentDoc is null) { _recordHeader.Text = ""; _grid.Clear(); return; }
         UpdateHeader();
-        _viewer.Rows.Clear();
-        foreach (var row in RecordDisplay.Build(doc.Record))
-        {
-            int i = _viewer.Rows.Add(row.FieldName, row.Tag, row.Indicators, row.Code, row.Value);
-            var gridRow = _viewer.Rows[i];
-            gridRow.Tag = row;
-            ApplyCellEditability(gridRow, row, doc);
-        }
-        _viewer.ClearSelection();
-        _rendering = false;
-
-        if (keep is { } k && RestoreCell(k))
-        {
-            if (resume && _viewer.CurrentCell is { ReadOnly: false }) _viewer.BeginEdit(false);
-        }
-    }
-
-    /// <summary>The cursor's logical position (field/subfield/column), stable
-    /// across a rebuild because it is stored by model index, not grid row.</summary>
-    private (int FieldIndex, int SubfieldIndex, string Column)? CaptureCell()
-    {
-        var cell = _viewer.CurrentCell;
-        if (cell?.OwningRow.Tag is DisplayRow r)
-            return (r.FieldIndex, r.SubfieldIndex, _viewer.Columns[cell.ColumnIndex].Name);
-        return null;
-    }
-
-    /// <summary>Puts the cursor back on a captured position after a rebuild;
-    /// false when that field/subfield no longer exists (e.g. it was deleted).</summary>
-    private bool RestoreCell((int FieldIndex, int SubfieldIndex, string Column) pos)
-    {
-        foreach (DataGridViewRow gridRow in _viewer.Rows)
-        {
-            if (gridRow.Tag is DisplayRow r && r.FieldIndex == pos.FieldIndex && r.SubfieldIndex == pos.SubfieldIndex)
-            {
-                _viewer.CurrentCell = gridRow.Cells[pos.Column];
-                return true;
-            }
-        }
-        return false;
+        if (!ReferenceEquals(_grid.Document, _currentDoc))
+            _grid.Document = _currentDoc; // switch record: sync + rebuild fresh
+        else
+            _grid.Rebuild(preserveFocus: preservePosition);
     }
 
     private void UpdateHeader()
@@ -1312,161 +1213,10 @@ public sealed class MainForm : Form
         return doc.Dirty ? "***" : null;
     }
 
-    /// <summary>Which cells accept typing, per row shape: the name column never;
-    /// tag only on a field's first row; indicators only on data fields; code
-    /// only where a subfield can live; the leader's value is its whole row.</summary>
-    private static void ApplyCellEditability(DataGridViewRow gridRow, DisplayRow row, EditorDocument doc)
-    {
-        bool leader = row.FieldIndex < 0;
-        bool control = !leader && doc.Record.Fields[row.FieldIndex].IsControl;
-        bool continuation = !leader && row.Tag.Length == 0; // second+ subfield rows
-
-        gridRow.Cells["tag"].ReadOnly = leader || continuation;
-        gridRow.Cells["ind"].ReadOnly = leader || control || continuation;
-        gridRow.Cells["code"].ReadOnly = leader || control;
-    }
-
-    /// <summary>An edited cell is committed into the document. Structural
-    /// outcomes (retag, subfield created on an empty field) re-render — deferred
-    /// with BeginInvoke because rebuilding rows inside CellEndEdit re-enters the
-    /// grid. Plain value edits only normalize the cell text in place.</summary>
-    private void ViewerCellEndEdit(object? sender, DataGridViewCellEventArgs e)
-    {
-        if (_rendering || _currentDoc is null) return;
-        var doc = _currentDoc;
-        var gridRow = _viewer.Rows[e.RowIndex];
-        if (gridRow.Tag is not DisplayRow row) return;
-        var cell = gridRow.Cells[e.ColumnIndex];
-        string text = cell.Value?.ToString() ?? "";
-        string? error = null;
-        bool structural = false;
-
-        switch (_viewer.Columns[e.ColumnIndex].Name)
-        {
-            case "value" when row.FieldIndex < 0:
-                error = doc.SetLeader(text);
-                cell.Value = Caret(doc.Record.Leader); // on error this restores the old text
-                break;
-            case "value" when doc.Record.Fields[row.FieldIndex].IsControl:
-                doc.SetControlData(row.FieldIndex, text);
-                cell.Value = Caret(doc.Record.Fields[row.FieldIndex].ControlData ?? "");
-                break;
-            case "value":
-                structural = row.SubfieldIndex < 0 && text.Length > 0; // typing creates the subfield
-                doc.SetSubfieldValue(row.FieldIndex, row.SubfieldIndex, text);
-                break;
-            case "tag":
-                error = doc.SetTag(row.FieldIndex, text);
-                if (error is null) structural = true;
-                else cell.Value = row.Tag; // refused — put the old tag back
-                break;
-            case "ind":
-                doc.SetIndicators(row.FieldIndex, text);
-                var f = doc.Record.Fields[row.FieldIndex];
-                cell.Value = new string(new[] { f.Ind1 == ' ' ? '_' : f.Ind1, f.Ind2 == ' ' ? '_' : f.Ind2 });
-                break;
-            case "code":
-                structural = row.SubfieldIndex < 0 && text.Length > 0;
-                doc.SetSubfieldCode(row.FieldIndex, row.SubfieldIndex, text);
-                if (!structural && row.SubfieldIndex >= 0)
-                    cell.Value = doc.Record.Fields[row.FieldIndex].Subfields[row.SubfieldIndex].Code.ToString();
-                break;
-        }
-
-        if (error != null) SetMessage(error);
-        UpdateHeader();
-        UpdateSidebarItem(doc); // keep the sidebar's accession "***" / status in sync as you edit
-        if (structural)
-        {
-            // The grid has already advanced the cursor (Tab/Enter) to the next
-            // cell; re-render preserving that spot and drop back into it so the
-            // tag→indicators→code→value flow stays on the keyboard (task 5).
-            _resumeEditAfterRender = true;
-            BeginInvoke(() => RenderRecord());
-        }
-    }
-
-    /// <summary>Sets up the editing control every time a cell opens (the grid reuses
-    /// one control across cells). Two jobs: cap the width to the fixed MARC sizes
-    /// (tag 3 / indicators 2 / code 1; value unlimited), and position the selection.
-    ///
-    /// The selection is set on a <see cref="Control.BeginInvoke(Delegate)"/> — i.e.
-    /// AFTER the grid has finished loading the cell's text into the control. Because
-    /// the grid is <c>EditOnEnter</c>, editing begins when the cell is ENTERED, not
-    /// when a key is pressed, so this deferred call always runs before the user's
-    /// first keystroke — no race (the old code's race was a deferred SelectAll fired
-    /// while editing was STARTED by that keystroke). Doing it deferred is what makes
-    /// it reliable: hanging it on TextChanged missed the case where you re-enter a
-    /// cell whose value equals the reused control's text (no change → no event → the
-    /// full placeholder stayed unselected → every keystroke overflowed → the ding).</summary>
-    private void ViewerEditingControlShowing(object? sender, DataGridViewEditingControlShowingEventArgs e)
-    {
-        if (e.Control is not TextBox tb) return;
-        string? col = _viewer.CurrentCell?.OwningColumn.Name;
-        _editCol = col;
-        tb.MaxLength = col switch { "tag" => 3, "ind" => 2, "code" => 1, _ => 0 };
-
-        bool micro = col is "tag" or "ind" or "code";
-        bool caretStart = _caretAtStartNextEdit;
-        _caretAtStartNextEdit = false;
-        tb.TextChanged -= MicroAdvance; // drop any hand-off handler left on the reused control
-
-        BeginInvoke(() =>
-        {
-            if (tb.IsDisposed) return;
-            if (micro)
-            {
-                // Select the whole 1-3 char content (placeholder or real) so the first
-                // keystroke REPLACES it instead of overflowing the width and dinging.
-                tb.SelectAll();
-                // From here on, real typing that fills the cell hands off to the next.
-                if (col is "ind" or "code") { tb.TextChanged -= MicroAdvance; tb.TextChanged += MicroAdvance; }
-            }
-            else
-            {
-                // Value / control-data: caret at the end, or at the START on Insert (#3).
-                tb.SelectionStart = caretStart ? 0 : tb.TextLength;
-                tb.SelectionLength = 0;
-            }
-        });
-    }
-
-    /// <summary>Once an indicators (2) or subfield-code (1) cell is filled to its
-    /// width by typing, hand focus to the next cell in the tag→ind→code→value flow
-    /// so the cataloguer keeps typing straight into the body — a subfield code is
-    /// always one character, indicators always two, so there is nothing more to type
-    /// there (tasks #8, #9). Only fires on real keystrokes: it is subscribed after
-    /// the box is primed, and setting the code/indicators is a non-structural edit,
-    /// so the row is not rebuilt underneath the hand-off.</summary>
-    private void MicroAdvance(object? sender, EventArgs e)
-    {
-        if (sender is not TextBox tb || tb.MaxLength <= 0 || tb.Text.Length < tb.MaxLength) return;
-        string? next = _editCol switch { "ind" => "code", "code" => "value", _ => null };
-        if (next is null) return;
-        // Typing a code onto a subfield-less field CREATES the subfield — a structural
-        // edit that rebuilds the row — so only hand off from a code cell that already
-        // backs a real subfield; there the change is in-place and the row is stable.
-        if (_editCol == "code" && _viewer.CurrentCell?.OwningRow.Tag is DisplayRow r && r.SubfieldIndex < 0) return;
-        tb.TextChanged -= MicroAdvance; // one hand-off per cell
-        int rowIndex = _viewer.CurrentCell?.RowIndex ?? -1;
-        BeginInvoke(() =>
-        {
-            _viewer.EndEdit();
-            if (rowIndex < 0 || rowIndex >= _viewer.Rows.Count) return;
-            var target = _viewer.Rows[rowIndex].Cells[next];
-            if (target.ReadOnly) return;
-            _viewer.CurrentCell = target;
-            _viewer.Focus();
-            _viewer.BeginEdit(false);
-        });
-    }
-
-    private static string Caret(string s) => s.Replace(' ', '^');
-
     private void UndoEdit()
     {
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
-        _viewer.EndEdit(); // commit any in-progress cell edit so Ctrl+Z reverts it too
+        _grid.CommitFocused(); // commit any in-progress edit so Ctrl+Z reverts it too
         if (!_currentDoc.Undo()) { SetMessage("Nothing to undo."); return; }
         RenderRecord();
         UpdateSidebarItem(_currentDoc);
@@ -1476,92 +1226,72 @@ public sealed class MainForm : Form
     private void RedoEdit()
     {
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
-        _viewer.EndEdit();
+        _grid.CommitFocused();
         if (!_currentDoc.Redo()) { SetMessage("Nothing to redo."); return; }
         RenderRecord();
         UpdateSidebarItem(_currentDoc);
         SetMessage("Redo.");
     }
 
-    /// <summary>The field/subfield the cursor is on, in model indices.</summary>
-    private (int FieldIndex, int SubfieldIndex)? CurrentRef() =>
-        _viewer.CurrentCell?.OwningRow.Tag is DisplayRow row
-            ? (row.FieldIndex, row.SubfieldIndex)
-            : null;
+    /// <summary>The field/subfield the caret is on, in model indices.</summary>
+    private (int FieldIndex, int SubfieldIndex)? CurrentRef() => _grid.CurrentRef();
 
-    /// <summary>Puts the cursor on a field/subfield after a structural change and
-    /// focuses the grid, so the cursor visibly lands there — e.g. on the field
-    /// below after a delete — instead of leaving focus adrift (task 2a).</summary>
-    private void SelectCell(int fieldIndex, int subfieldIndex, string column)
+    /// <summary>Maps a legacy column name to a grid box part for focus calls.</summary>
+    private static BoxPart PartOf(string column) => column switch
     {
-        foreach (DataGridViewRow gridRow in _viewer.Rows)
-        {
-            if (gridRow.Tag is DisplayRow r && r.FieldIndex == fieldIndex && r.SubfieldIndex == subfieldIndex)
-            {
-                _viewer.CurrentCell = gridRow.Cells[column];
-                _viewer.Focus();
-                return;
-            }
-        }
-    }
+        "tag" => BoxPart.Tag,
+        "ind" => BoxPart.Ind,
+        "code" => BoxPart.Code,
+        _ => BoxPart.Value,
+    };
 
-    /// <summary>Lands the cursor on a field's first row (its tag cell) whatever the
-    /// field's shape — the reliable "put me on this field" after a multi-field
-    /// delete, where the surviving field may be a data field with subfields.</summary>
-    private void SelectFieldRow(int fieldIndex, string column = "tag")
-    {
-        foreach (DataGridViewRow gridRow in _viewer.Rows)
-        {
-            if (gridRow.Tag is DisplayRow r && r.FieldIndex == fieldIndex)
-            {
-                _viewer.CurrentCell = gridRow.Cells[column];
-                _viewer.Focus();
-                return;
-            }
-        }
-    }
+    /// <summary>Puts the caret on a field/subfield element after a change — e.g. the
+    /// field below after a delete (task 2a). Delegates to the grid's reliable focus.</summary>
+    private void SelectCell(int fieldIndex, int subfieldIndex, string column) =>
+        _grid.FocusElement(fieldIndex, subfieldIndex, PartOf(column));
 
-    /// <summary>Insert: drop into the current cell with a caret at the end — the
-    /// "pulsing bar", not a highlighted value — so the record reads as a text
-    /// editor (task 1). Read-only cells (a field name, a control field's
-    /// indicators) simply say so.</summary>
+    /// <summary>Lands the caret on a field's first row whatever the field's shape —
+    /// the reliable "put me on this field" after a multi-field delete.</summary>
+    private void SelectFieldRow(int fieldIndex, string column = "tag") =>
+        _grid.FocusField(fieldIndex, PartOf(column));
+
+    /// <summary>Insert: make sure the caret is in an editable box, dropped at the
+    /// start of a value so a filled field is prepended to (task #3). In the textbox
+    /// grid every box is always editable when focused, so there is no edit mode to
+    /// enter — this just parks the caret.</summary>
     private void BeginEditCurrentCell()
     {
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
-        if (_viewer.CurrentCell is not { } cell) { SetMessage("Stand on a field first."); return; }
-        if (cell.ReadOnly) { SetMessage("Nothing to type here — move to the tag, indicators, code or value."); return; }
-        _viewer.Focus();
-        // Insert on a filled value drops the caret at the START of the text, so the
-        // cataloguer prepends rather than being parked after the last character
-        // (task #3). Micro-cells ignore the flag — they select-all instead.
-        _caretAtStartNextEdit = true;
-        _viewer.BeginEdit(false); // false = caret, not select-all (EditingControlShowing places the caret)
+        _grid.FocusForEdit();
     }
 
-    /// <summary>Enter: order the fields (stable sort by tag) and keep the cursor
-    /// on the field you were on — it follows to its new position instead of the
-    /// grid dropping you onto the row below (tasks 8, 17). Undoable in one step.</summary>
+    /// <summary>Enter: order the fields (stable sort by tag) and keep the caret on
+    /// the field you were on — it follows to its new position instead of dropping to
+    /// the row below (tasks 8, 17). Undoable in one step.</summary>
     private void OrderFieldsCommand()
     {
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
-        _viewer.EndEdit();               // commit the cell first (a just-typed tag counts)
-        _resumeEditAfterRender = false;  // don't let a structural commit re-open the box under us
+        _grid.CommitFocused(); // commit the box first (a just-typed tag counts)
 
         // Remember the field by REFERENCE (its index changes when fields move) plus
-        // the column and subfield so the cursor lands back on the same spot.
-        string column = _viewer.CurrentCell?.OwningColumn.Name ?? "tag";
-        var cur = CurrentRef();
+        // the part and subfield so the caret lands back on the same spot.
+        var cur = _grid.CurrentElement();
+        BoxPart part = cur?.Part ?? BoxPart.Tag;
         MarcField? field = cur is { FieldIndex: >= 0 } c ? _currentDoc.Record.Fields[c.FieldIndex] : null;
         int sub = cur?.SubfieldIndex ?? -1;
 
         bool moved = _currentDoc.OrderFields();
-        RenderRecord(preservePosition: false);
-        UpdateSidebarItem(_currentDoc);
-
-        if (field is not null)
+        // Only rebuild when the order actually changed — a no-op Enter shouldn't
+        // redraw the whole record (the caret just stays put).
+        if (moved)
         {
-            int idx = _currentDoc.Record.Fields.IndexOf(field);
-            if (idx >= 0) SelectCell(idx, sub, column);
+            RenderRecord(preservePosition: false);
+            UpdateSidebarItem(_currentDoc);
+            if (field is not null)
+            {
+                int idx = _currentDoc.Record.Fields.IndexOf(field);
+                if (idx >= 0) _grid.FocusElement(idx, sub, part);
+            }
         }
         SetMessage(moved ? "Fields ordered." : "Fields already in order.");
     }
@@ -1569,26 +1299,21 @@ public sealed class MainForm : Form
     private void NewField()
     {
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
-        _viewer.EndEdit();
+        _grid.CommitFocused();
         int after = CurrentRef()?.FieldIndex ?? _currentDoc.Record.Fields.Count - 1;
         int at = _currentDoc.InsertBlankFieldAfter(after);
         RenderRecord();
-        // Enter the tag cell AFTER the grid has finished rebuilding its rows: opening
-        // the editor in the same message as the rebuild left the new field un-typable
-        // until you clicked away and back (tasks #10, #13). SelectFieldRow finds the
-        // new field's first row whatever its shape.
-        BeginInvoke(() =>
-        {
-            SelectFieldRow(at, "tag");
-            _viewer.BeginEdit(false); // placeholder cleared, caret at the start — type at once
-        });
+        // The rebuild is synchronous, so land in the new field's tag box at once —
+        // no BeginInvoke race. The blank field is data-shaped, so type the tag then
+        // Tab straight through indicators, code and value with no further rebuild.
+        _grid.FocusField(at, BoxPart.Tag);
         SetMessage("New field — type its tag, then Tab through indicators, code and value.");
     }
 
     private void NewSubfield()
     {
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
-        _viewer.EndEdit();
+        _grid.CommitFocused();
         if (CurrentRef() is not { } at || at.FieldIndex < 0)
         {
             SetMessage("Stand in a field first.");
@@ -1597,20 +1322,15 @@ public sealed class MainForm : Form
         var (index, error) = _currentDoc.InsertSubfieldAfter(at.FieldIndex, at.SubfieldIndex);
         if (error != null) { SetMessage(error); return; }
         RenderRecord();
-        // Defer entering the code cell until the rebuild settles (same timing fix as
-        // NewField). The default ‡a opens selected, so typing "e" rewrites it to ‡e
-        // and then hands off to the body (tasks #8, #13).
-        BeginInvoke(() =>
-        {
-            SelectCell(at.FieldIndex, index, "code");
-            _viewer.BeginEdit(false);
-        });
+        // Land in the new subfield's code box. Its default ‡a opens selected (grid's
+        // micro-box rule), so typing "e" rewrites it to ‡e, then Tab into the body.
+        _grid.FocusElement(at.FieldIndex, index, BoxPart.Code);
     }
 
     private void DeleteCurrentField()
     {
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
-        _viewer.EndEdit();
+        _grid.CommitFocused();
         if (CurrentRef() is not { } at || at.FieldIndex < 0)
         {
             SetMessage("Stand in a field first (the leader cannot be deleted).");
@@ -1624,24 +1344,23 @@ public sealed class MainForm : Form
             SelectFieldRow(Math.Min(at.FieldIndex, _currentDoc.Record.Fields.Count - 1), "value");
     }
 
-    /// <summary>Ctrl+Shift+F5: delete every field that has a selected cell in one
-    /// undoable step — the bulk prune for a pasted-in record (user request
-    /// 2026-08-01). With one field selected it behaves like Ctrl+F5; several ask
-    /// first. The leader is never touched.</summary>
+    /// <summary>Ctrl+Shift+F5: delete every gutter-selected field in one undoable
+    /// step — the bulk prune for a pasted-in record (user request 2026-08-01).
+    /// Fields are gutter-selected by clicking the maroon name column (Shift/Ctrl to
+    /// extend); with nothing selected it falls back to the field under the caret, so
+    /// it still behaves like Ctrl+F5. The leader is never touched.</summary>
     private void DeleteSelectedFields()
     {
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
-        _viewer.EndEdit();
+        _grid.CommitFocused();
 
-        var indices = _viewer.SelectedCells.Cast<DataGridViewCell>()
-            .Select(c => c.OwningRow.Tag as DisplayRow)
-            .Where(r => r is { FieldIndex: >= 0 })
-            .Select(r => r!.FieldIndex)
-            .Distinct().ToList();
+        var indices = _grid.SelectedFieldIndices.Where(i => i >= 0).Distinct().ToList();
+        if (indices.Count == 0 && CurrentRef() is { FieldIndex: >= 0 } at)
+            indices.Add(at.FieldIndex); // nothing gutter-selected: prune the current field
 
         if (indices.Count == 0)
         {
-            SetMessage("Select one or more fields first (the leader cannot be deleted).");
+            SetMessage("Click a field's name to select it (Shift/Ctrl-click for several), then delete.");
             return;
         }
         if (indices.Count > 1 && MessageBox.Show(this,
@@ -1662,7 +1381,7 @@ public sealed class MainForm : Form
     private void DeleteCurrentSubfield()
     {
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
-        _viewer.EndEdit();
+        _grid.CommitFocused();
         if (CurrentRef() is not { } at || at.FieldIndex < 0 || at.SubfieldIndex < 0)
         {
             SetMessage("Stand in a subfield first.");
@@ -1683,7 +1402,7 @@ public sealed class MainForm : Form
     private void CopyField()
     {
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
-        _viewer.EndEdit();
+        _grid.CommitFocused();
         if (CurrentRef() is not { } at || at.FieldIndex < 0)
         {
             SetMessage("Stand in a field first (the leader cannot be copied).");
@@ -1700,18 +1419,15 @@ public sealed class MainForm : Form
     {
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
         if (_fieldClipboard is null) { SetMessage("No field copied yet — Ctrl+T copies the current field."); return; }
-        _viewer.EndEdit();
+        _grid.CommitFocused();
         int after = CurrentRef()?.FieldIndex ?? _currentDoc.Record.Fields.Count - 1;
         int at = _currentDoc.PasteFieldAfter(after, _fieldClipboard);
         RenderRecord();
         UpdateSidebarItem(_currentDoc);
         UpdateHeader();
-        // Land the cursor IN the pasted field ready to edit. SelectFieldRow finds
-        // the field's first row whatever its shape — a data field's first row
-        // carries SubfieldIndex 0, so the old SelectCell(at, -1, …) matched no row
-        // and the cursor never moved onto the paste (task 10).
-        SelectFieldRow(at);
-        _viewer.BeginEdit(false);
+        // Land the caret IN the pasted field ready to edit (its first row whatever
+        // its shape — data fields start at SubfieldIndex 0).
+        _grid.FocusField(at, BoxPart.Tag);
         SetMessage($"Pasted field {_fieldClipboard.Tag}.");
     }
 
@@ -1720,7 +1436,7 @@ public sealed class MainForm : Form
     private void CopySubfield()
     {
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
-        _viewer.EndEdit();
+        _grid.CommitFocused();
         if (CurrentRef() is not { } at || at.FieldIndex < 0 || at.SubfieldIndex < 0)
         {
             SetMessage("Stand on a subfield first.");
@@ -1736,7 +1452,7 @@ public sealed class MainForm : Form
     {
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
         if (_subfieldClipboard is null) { SetMessage("No subfield copied yet — Ctrl+S copies the current subfield."); return; }
-        _viewer.EndEdit();
+        _grid.CommitFocused();
         if (CurrentRef() is not { } at || at.FieldIndex < 0)
         {
             SetMessage("Stand in a field first.");
@@ -1760,7 +1476,7 @@ public sealed class MainForm : Form
     private void EditFixedField()
     {
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
-        _viewer.EndEdit();
+        _grid.CommitFocused();
         if (CurrentRef() is not { } at) { SetMessage("Stand on the leader or an 008 field first."); return; }
         var doc = _currentDoc;
 
@@ -1814,7 +1530,7 @@ public sealed class MainForm : Form
     {
         if (!RequireCatalogue()) return;
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
-        _viewer.EndEdit();
+        _grid.CommitFocused();
 
         var doc = _currentDoc;
         if (doc.Stored.Base != "BIB")
@@ -1885,7 +1601,7 @@ public sealed class MainForm : Form
     {
         if (!RequireCatalogue()) return;
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
-        _viewer.EndEdit();
+        _grid.CommitFocused();
         StripEmptyFieldsAndRefresh(_currentDoc); // validate removes contentless fields (task 17)
 
         // A brief, visible beat so the cataloguer sees that validation ran — a
@@ -1915,7 +1631,7 @@ public sealed class MainForm : Form
     {
         if (!RequireCatalogue()) return;
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
-        _viewer.EndEdit();
+        _grid.CommitFocused();
 
         var doc = _currentDoc;
 
@@ -2084,14 +1800,9 @@ public sealed class MainForm : Form
         if (_findings.SelectedItems[0].Tag is not FieldRef r) return;
 
         ShowRecordView();
-        foreach (DataGridViewRow gridRow in _viewer.Rows)
-        {
-            if (gridRow.Tag is not DisplayRow d || d.FieldIndex != r.FieldIndex) continue;
-            if (r.SubfieldIndex >= 0 && d.SubfieldIndex != r.SubfieldIndex) continue;
-            _viewer.CurrentCell = gridRow.Cells["value"];
-            _viewer.Focus();
-            return;
-        }
+        // Land on the value box of the offending field/subfield (a record-level ref
+        // with SubfieldIndex -1 falls back to the field's first row).
+        _grid.FocusElement(r.FieldIndex, r.SubfieldIndex, BoxPart.Value);
     }
 
     // ---------- MARC output folder ----------
@@ -2506,7 +2217,7 @@ public sealed class MainForm : Form
 
         if (_recordView.Visible && _currentDoc is not null)
         {
-            _viewer.EndEdit();
+            _grid.CommitFocused();
             var copy = EditorDocument.CopyWithout001(_currentDoc.Record);
             AddToSidebar(new EditorDocument(new StoredRecord(_currentDoc.Stored.Base, copy), dirty: true));
             SetMessage("Copied as a new draft — 001 will be assigned at push.");
@@ -2544,7 +2255,7 @@ public sealed class MainForm : Form
     {
         if (!RequireCatalogue()) return;
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
-        _viewer.EndEdit();
+        _grid.CommitFocused();
 
         try
         {
@@ -2577,7 +2288,7 @@ public sealed class MainForm : Form
     private void SaveTemplate()
     {
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
-        _viewer.EndEdit();
+        _grid.CommitFocused();
 
         using var dialog = new SaveFileDialog
         {
