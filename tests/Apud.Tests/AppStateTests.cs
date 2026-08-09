@@ -32,6 +32,14 @@ public class AppStateTests : IDisposable
     }
 
     [Fact]
+    public void Round_trips_the_last_catalogue()
+    {
+        new AppState { LastCatalogue = @"C:\cat\catalog.db" }.SaveTo(_path);
+        Assert.Equal(@"C:\cat\catalog.db", AppState.LoadFrom(_path).LastCatalogue);
+        Assert.Null(AppState.LoadFrom(_path + ".missing").LastCatalogue); // absent → null, no reopen
+    }
+
+    [Fact]
     public void Round_trips_the_first_run_flag()
     {
         new AppState { FirstRunDone = true }.SaveTo(_path);

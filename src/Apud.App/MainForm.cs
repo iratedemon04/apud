@@ -505,9 +505,20 @@ public sealed class MainForm : Form
         configReports.AddRange(_keymap.Diagnostics);
         Load += (_, _) =>
         {
-            SetMessage(configReports.Count > 0
-                ? string.Join("  |  ", configReports)
-                : "No catalogue open — File → New Catalogue or Open Catalogue.");
+            // Reopen the last catalogue on launch when it still exists (user,
+            // 2026-08-08). A moved/deleted one is silently skipped; a corrupt one
+            // reports through OpenCatalog's own dialog and leaves nothing open.
+            if (!string.IsNullOrEmpty(_appState.LastCatalogue) && File.Exists(_appState.LastCatalogue))
+                OpenCatalog(_appState.LastCatalogue);
+
+            // Config diagnostics (bad keymap/profile entries) always win the message
+            // bar; otherwise OpenCatalog's own "Catalogue open…" line stands, and only
+            // when nothing opened do we prompt to open one.
+            if (configReports.Count > 0)
+                SetMessage(string.Join("  |  ", configReports));
+            else if (_repo is null)
+                SetMessage("No catalogue open — File → New Catalogue or Open Catalogue.");
+
             MaybeShowIntro();
         };
         FormClosing += OnFormClosing;
@@ -862,6 +873,10 @@ public sealed class MainForm : Form
         ShowSearchView();
 
         LoadDraftsIntoSidebar(); // drafts aren't searchable — reopen them so work-in-progress survives a restart
+
+        // Remember it so Apud reopens it on next launch.
+        _appState.LastCatalogue = path;
+        _appState.Save();
 
         Text = $"Apud — {path}";
         int drafts = _openList.Items.Count;
