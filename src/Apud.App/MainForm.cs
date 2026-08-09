@@ -175,8 +175,8 @@ public sealed class MainForm : Form
         // closes the selected record(s), Ctrl+C closes them all; either warns first
         // if anything is unsaved, and Enter confirms (tasks #5, #6). Both Global so
         // they work from the editor or the search screen.
-        _commands.Add(new Command { Id = "record.close", Name = "&Close Record", DefaultKey = "Ctrl+C", Execute = RemoveSelectedOpenRecords });
-        _commands.Add(new Command { Id = "record.close-all", Name = "Close &All Records", DefaultKey = "Ctrl+Alt+C", Execute = RemoveAllOpenRecords });
+        _commands.Add(new Command { Id = "record.close", Name = "&Close Record", Execute = RemoveSelectedOpenRecords });
+        _commands.Add(new Command { Id = "record.close-all", Name = "Close &All Records", DefaultKey = "Ctrl+X", Execute = RemoveAllOpenRecords });
         // Catalogue-delete is destructive, so it always confirms; on Ctrl+Delete now
         // (user, 2026-08-08 — close moved to Ctrl+C / Ctrl+Alt+C).
         _commands.Add(new Command { Id = "record.delete", Name = "&Delete Record/Draft...", Context = CommandContext.Editor, DefaultKey = "Ctrl+Delete", Execute = DeleteRecord });
@@ -268,7 +268,7 @@ public sealed class MainForm : Form
         _openList.Columns.Add("Title", 130);
         _openList.Columns.Add("Status", 50);
         _openList.SelectedIndexChanged += (_, _) => ShowSelectedOpenRecord();
-        // Closing is on Ctrl+C (record.close) / Ctrl+Alt+C (record.close-all);
+        // Close All is on Ctrl+X (record.close-all); Close Record is menu-only;
         // Ctrl+Delete deletes (record.delete). Bare Delete does nothing here.
         var openMenu = new ContextMenuStrip();
         openMenu.Items.Add("Close", null, (_, _) => RemoveSelectedOpenRecords());
