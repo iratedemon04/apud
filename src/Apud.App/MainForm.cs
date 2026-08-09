@@ -1281,7 +1281,6 @@ public sealed class MainForm : Form
         if (!_currentDoc.Undo()) { SetMessage("Nothing to undo."); return; }
         RenderRecord();
         UpdateSidebarItem(_currentDoc);
-        SetMessage(_currentDoc.CanUndo ? "Undo." : "Undo — nothing more to undo.");
     }
 
     private void RedoEdit()
@@ -1291,7 +1290,6 @@ public sealed class MainForm : Form
         if (!_currentDoc.Redo()) { SetMessage("Nothing to redo."); return; }
         RenderRecord();
         UpdateSidebarItem(_currentDoc);
-        SetMessage("Redo.");
     }
 
     /// <summary>The field/subfield the caret is on, in model indices.</summary>
@@ -1354,7 +1352,6 @@ public sealed class MainForm : Form
                 if (idx >= 0) _grid.FocusElement(idx, sub, part);
             }
         }
-        SetMessage(moved ? "Fields ordered." : "Fields already in order.");
     }
 
     private void NewField()
@@ -1368,7 +1365,6 @@ public sealed class MainForm : Form
         // no BeginInvoke race. The blank field is data-shaped, so type the tag then
         // Tab straight through indicators, code and value with no further rebuild.
         _grid.FocusField(at, BoxPart.Tag);
-        SetMessage("New field — type its tag, then Tab through indicators, code and value.");
     }
 
     private void NewSubfield()
@@ -1415,7 +1411,6 @@ public sealed class MainForm : Form
         // Land on the BODY of the field that shifted up (task #7).
         if (_currentDoc.Record.Fields.Count > 0)
             SelectFieldRow(Math.Min(land, _currentDoc.Record.Fields.Count - 1), "value");
-        SetMessage(selected.Count > 1 ? $"Deleted {selected.Count} fields." : "Field deleted.");
     }
 
     /// <summary>Ctrl+Shift+F5: same selection-aware delete as Ctrl+F5, kept as a
@@ -1453,7 +1448,7 @@ public sealed class MainForm : Form
             return;
         }
         _fieldClipboard = _currentDoc.CopyField(at.FieldIndex);
-        SetMessage($"Copied field {_currentDoc.Record.Fields[at.FieldIndex].Tag} — Alt+T pastes it.");
+        SetMessage("Field copied.");
     }
 
     /// <summary>Alt+T: paste the copied field as a new field just below the cursor
@@ -1462,7 +1457,7 @@ public sealed class MainForm : Form
     private void PasteField()
     {
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
-        if (_fieldClipboard is null) { SetMessage("No field copied yet — Ctrl+T copies the current field."); return; }
+        if (_fieldClipboard is null) { SetMessage("No field copied yet."); return; }
         _grid.CommitFocused();
         int after = CurrentRef()?.FieldIndex ?? _currentDoc.Record.Fields.Count - 1;
         int at = _currentDoc.PasteFieldAfter(after, _fieldClipboard);
@@ -1472,7 +1467,6 @@ public sealed class MainForm : Form
         // Land the caret IN the pasted field ready to edit (its first row whatever
         // its shape — data fields start at SubfieldIndex 0).
         _grid.FocusField(at, BoxPart.Tag);
-        SetMessage($"Pasted field {_fieldClipboard.Tag}.");
     }
 
     /// <summary>Ctrl+S: copy the subfield under the cursor onto the subfield
@@ -1487,7 +1481,7 @@ public sealed class MainForm : Form
             return;
         }
         _subfieldClipboard = _currentDoc.CopySubfield(at.FieldIndex, at.SubfieldIndex);
-        SetMessage($"Copied subfield ‡{_subfieldClipboard.Code} — Alt+S pastes it.");
+        SetMessage("Subfield copied.");
     }
 
     /// <summary>Alt+S: paste the copied subfield just after the cursor's subfield
@@ -1495,7 +1489,7 @@ public sealed class MainForm : Form
     private void PasteSubfield()
     {
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
-        if (_subfieldClipboard is null) { SetMessage("No subfield copied yet — Ctrl+S copies the current subfield."); return; }
+        if (_subfieldClipboard is null) { SetMessage("No subfield copied yet."); return; }
         _grid.CommitFocused();
         if (CurrentRef() is not { } at || at.FieldIndex < 0)
         {
@@ -1507,7 +1501,6 @@ public sealed class MainForm : Form
         RenderRecord();
         UpdateSidebarItem(_currentDoc);
         SelectCell(at.FieldIndex, index, "value");
-        SetMessage($"Pasted subfield ‡{_subfieldClipboard.Code}.");
     }
 
     // ---------- fixed-field position editor (Module 7) ----------
@@ -1561,7 +1554,6 @@ public sealed class MainForm : Form
         RenderRecord();
         UpdateSidebarItem(doc);
         SelectCell(at.FieldIndex, -1, "value");
-        SetMessage($"{(at.FieldIndex < 0 ? "Leader" : "008")} updated by position.");
     }
 
     // ---------- authority browse + link (Ctrl+F4, Module 8) ----------
@@ -1579,7 +1571,7 @@ public sealed class MainForm : Form
         var doc = _currentDoc;
         if (doc.Stored.Base != "BIB")
         {
-            SetMessage("Ctrl+F4 links bibliographic headings to the authority base — open a BIB record.");
+            SetMessage("Open a bibliographic record to link headings.");
             return;
         }
         if (CurrentRef() is not { } at || at.FieldIndex < 0)
@@ -1591,7 +1583,7 @@ public sealed class MainForm : Form
         var field = doc.Record.Fields[at.FieldIndex];
         if (!Headings.IsControlledBibTag(field.Tag))
         {
-            SetMessage($"{field.Tag} is not a controlled heading field — Ctrl+F4 works on 1XX/240/6XX/7XX/8XX.");
+            SetMessage($"{field.Tag} is not a controlled heading field.");
             return;
         }
 
@@ -1620,7 +1612,7 @@ public sealed class MainForm : Form
         RenderRecord();
         UpdateSidebarItem(doc);
         SelectCell(at.FieldIndex, 0, "value");
-        SetMessage($"Linked {field.Tag} to authorized heading: {form.SelectedDisplay}");
+        SetMessage("Heading linked.");
     }
 
     // ---------- validate + push (Ctrl+W / Ctrl+L, Module 9) ----------
@@ -1661,10 +1653,7 @@ public sealed class MainForm : Form
         var findings = new PushService(_repo).Check(_currentDoc.Stored, profile);
         ShowFindings(findings);
 
-        if (findings.Count == 0)
-            SetMessage("✓ Validation complete — the record is valid, no problems found.");
-        else
-            SetMessage($"Validation complete — {FindingSummary(findings)} (see the list below). Nothing was pushed.");
+        SetMessage(findings.Count == 0 ? "Record is valid." : FindingSummary(findings));
     }
 
     /// <summary>Ctrl+L: validate and push. On any error nothing is written and the
@@ -1753,25 +1742,21 @@ public sealed class MainForm : Form
         ClearFindings();
 
         // Mirror the pushed record to <output folder>\<001>.mrk (user request).
-        // The push itself is already committed; a file-write failure is reported
-        // but does not undo the push.
-        string mirrorNote;
+        // The push itself is already committed; only a write FAILURE is worth a note
+        // (success and "no output folder" are silent — expected, covered in the manual).
+        string mirrorNote = "";
         try
         {
-            string? written = RecordMirror.Write(MarcOutFolder(doc.Stored.Base), doc.Record);
-            mirrorNote = written is not null
-                ? $" Wrote {Path.GetFileName(written)} to {Path.GetDirectoryName(written)}."
-                : $" (no MARC output folder — File → Set {doc.Stored.Base} Output Folder to save .mrk files.)";
+            RecordMirror.Write(MarcOutFolder(doc.Stored.Base), doc.Record);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            mirrorNote = $" (but its .mrk file could not be written: {ex.Message})";
+            mirrorNote = $" (.mrk file not written: {ex.Message})";
         }
 
         int warnings = result.Warnings.Count();
         string msg = $"Pushed as {doc.Record.ControlNumber} in {doc.Stored.Base}.";
-        if (warnings > 0) msg += $" {warnings} warning(s) — Ctrl+W to review.";
-        if (result.RippledFields > 0) msg += $" Rippled into {result.RippledFields} linked bib field(s).";
+        if (warnings > 0) msg += $" {warnings} warning(s).";
         SetMessage(msg + mirrorNote);
     }
 
@@ -1962,7 +1947,7 @@ public sealed class MainForm : Form
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
 
         _repo.SetSetting(key, dialog.SelectedPath);
-        SetMessage($"Pushed {@base} records will be written to {dialog.SelectedPath}.");
+        SetMessage("Output folder set.");
     }
 
     // ---------- server backup / publish (Module 11, docs/PLAN.md §9b) ----------
@@ -2209,7 +2194,6 @@ public sealed class MainForm : Form
             _drafts?.Delete(doc.DraftId);
             doc.DraftId = null;
             CloseOpenRecord(doc);
-            SetMessage("Draft discarded.");
             return;
         }
 
@@ -2251,7 +2235,7 @@ public sealed class MainForm : Form
         }
 
         CloseOpenRecord(doc);
-        SetMessage($"Deleted record {cn} from the catalogue and its .mrk file.");
+        SetMessage($"Deleted {cn}.");
     }
 
     /// <summary>Closes a record's sidebar entry and viewer after it is gone from
@@ -2285,7 +2269,6 @@ public sealed class MainForm : Form
             var copy = EditorDocument.CopyWithout001(_currentDoc.Record);
             AddToSidebar(new EditorDocument(new StoredRecord(_currentDoc.Stored.Base, copy), dirty: true));
             _grid.FocusElement(-1, -1, BoxPart.Leader); // start in the leader, no mouse needed
-            SetMessage("Copied as a new draft — 001 will be assigned at push.");
             return;
         }
 
@@ -2314,7 +2297,6 @@ public sealed class MainForm : Form
         string @base = record.Kind == Marc.Core.RecordKind.Authority ? "AUT" : "BIB";
         AddToSidebar(new EditorDocument(new StoredRecord(@base, record), dirty: true));
         _grid.FocusElement(-1, -1, BoxPart.Leader); // start in the leader, no mouse needed
-        SetMessage($"New {@base} record from {Path.GetFileNameWithoutExtension(picker.SelectedPath)}.");
     }
 
     private void SaveDraft()
@@ -2346,7 +2328,7 @@ public sealed class MainForm : Form
         doc.MarkSaved();
         UpdateSidebarItem(doc);
         UpdateHeader();
-        SetMessage("Saved as draft — it will reopen next time you open this catalogue.");
+        SetMessage("Draft saved.");
     }
 
     private void UpdateSidebarItem(EditorDocument doc)
@@ -2378,7 +2360,7 @@ public sealed class MainForm : Form
 
         File.WriteAllBytes(dialog.FileName,
             Marc.Core.Mrk.MrkWriter.ToBytes(new[] { _currentDoc.Record }));
-        SetMessage($"Template saved: {Path.GetFileName(dialog.FileName)}.");
+        SetMessage("Template saved.");
     }
 
     // ---------- import ----------
@@ -2535,8 +2517,7 @@ public sealed class MainForm : Form
             first ??= item;
         }
         if (first is not null) { _openList.SelectedItems.Clear(); first.Selected = true; } // → record view
-        SetMessage($"Imported {records.Count} record(s) as drafts to review — Ctrl+D to keep each, " +
-                   "Ctrl+L to push. Unsaved drafts are discarded on close.");
+        SetMessage($"Imported {records.Count} record(s) as drafts.");
     }
 
     // ---------- export ----------
