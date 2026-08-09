@@ -722,6 +722,7 @@ public sealed class MainForm : Form
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
         var ctx = ActiveContext;
+        Keys chord = NormalizeChord(keyData);
         // A binding that resolves to field.order (Enter by default) fires even
         // while a grid cell is being typed in — the typing guard would otherwise
         // swallow it. This overrides the grid's default "commit and drop to the
@@ -730,17 +731,37 @@ public sealed class MainForm : Form
         // findings list / search box is untouched.
         if (ctx == CommandContext.Editor && _currentDoc is not null
             && _grid.EditorHasFocus
-            && _keymap.Lookup(keyData, ctx) == "field.order")
+            && _keymap.Lookup(chord, ctx) == "field.order")
         {
             OrderFieldsCommand();
             return true;
         }
-        if (ShouldDispatch(keyData) && _keymap.Lookup(keyData, ctx) is string id)
+        if (ShouldDispatch(keyData) && _keymap.Lookup(chord, ctx) is string id)
         {
             _commands.Find(id)!.Execute();
             return true;
         }
         return base.ProcessCmdKey(ref msg, keyData);
+    }
+
+    /// <summary>Folds the physical variants of a chord onto the one form the keymap
+    /// binds against, so a single binding fires however the key is actually produced:
+    /// the numeric keypad +/-/0 map onto the main-row keys, and Shift is ignored on
+    /// the +/= key (on most layouts '+' IS Shift+'=', so "Ctrl++" and "Ctrl+=" are the
+    /// same intent — this is why Ctrl++ appeared dead while the menu worked).</summary>
+    private static Keys NormalizeChord(Keys keyData)
+    {
+        Keys code = keyData & Keys.KeyCode;
+        Keys mods = keyData & Keys.Modifiers;
+        code = code switch
+        {
+            Keys.Add => Keys.Oemplus,
+            Keys.Subtract => Keys.OemMinus,
+            Keys.NumPad0 => Keys.D0,
+            _ => code,
+        };
+        if (code == Keys.Oemplus) mods &= ~Keys.Shift;
+        return code | mods;
     }
 
     /// <summary>While the cursor is in a text control, only modified chords and

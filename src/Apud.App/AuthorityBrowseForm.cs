@@ -105,7 +105,13 @@ public sealed class AuthorityBrowseForm : Form
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
-        if (_list.Items.Count > 0) _list.Focus();
+        if (_list.Items.Count == 0) return;
+        _list.Focus();
+        // Re-scroll to the positioned heading now the list has its real height. The
+        // EnsureVisible in Fill() ran during construction — before the ListView had a
+        // handle/size — so it didn't actually scroll, leaving the selected heading
+        // pinned at the top out of view even though Enter would link it correctly.
+        if (_list.SelectedItems.Count > 0) _list.SelectedItems[0].EnsureVisible();
     }
 
     private void Reposition(string text) => Fill(_reposition(text));

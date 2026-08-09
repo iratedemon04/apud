@@ -220,12 +220,15 @@ public sealed class RecordGrid : Panel, IMessageFilter
             for (int i = micro; i < _microPool.Count; i++) _microPool[i].Visible = false;
             for (int i = wide; i < _widePool.Count; i++) _widePool[i].Visible = false;
             for (int i = label; i < _labelPool.Count; i++) _labelPool[i].Visible = false;
-
-            LayoutRows();
         }
         finally
         {
             ResumeLayout(false);
+            // Position + size AFTER ResumeLayout so setting AutoScrollMinSize performs
+            // immediately (updating the scroll range and, if needed, toggling the
+            // scrollbar the layout loop then reacts to) instead of being deferred by
+            // the suspended layout and left stale until the next resize.
+            LayoutRows();
             // Invalidate (not Update): schedule ONE async repaint so rapid rebuilds
             // (holding F7) coalesce into a single paint instead of one per keystroke.
             if (frozen) { SendMessage(Handle, WM_SETREDRAW, true, 0); Invalidate(true); }
@@ -404,38 +407,73 @@ public sealed class RecordGrid : Panel, IMessageFilter
     /// <summary>Positions every active control by hand: fixed columns, one row per
     /// subfield line, wrapped value/leader/control rows measured explicitly (a
     /// multiline TextBox reports no preferred height — Spike 1). O(n), no
-    /// TableLayoutPanel. Runs on rebuild and on resize.</summary>
+    /// TableLayoutPanel. Runs on rebuild and on resize.
+    ///
+    /// A single pass can settle on the wrong height: laying out taller-than-viewport
+    /// content makes the vertical scrollbar appear, which shrinks ClientSize.Width,
+    /// which re-wraps the value column TALLER — but the scrollbar's range was already
+    /// fixed against the narrower content. That is the "can't scroll to the last
+    /// fields until I resize the window" bug. So we re-run until the width the layout
+    /// saw matches the width it produced (at most a couple of passes — once the
+    /// scrollbar is on it stays on), setting <see cref="ScrollableControl.AutoScrollMinSize"/>
+    /// each pass so the scroll range is refreshed deterministically (a plain child
+    /// resize under a suspended/never-performed layout would leave it stale).</summary>
     private void LayoutRows()
     {
         if (_measuring) return;
         _measuring = true;
         try
         {
-            if (_doc is null || _rowCount == 0) { _body.Size = new Size(ClientSize.Width, 0); return; }
-
-            int valueW = Math.Max(60, ClientSize.Width - FixedW);
-
-            if (valueW != _cacheWidth) { _heightCache.Clear(); _cacheWidth = valueW; }
-            var rowH = new int[_rowCount];
-            Array.Fill(rowH, LineH + VPad);
-            foreach (var p in _placements)
-                if (p.Wide && p.C is TextBox tb)
-                    rowH[p.Row] = MeasureWide(tb, valueW);
-
-            var rowY = new int[_rowCount];
-            int acc = 0;
-            for (int r = 0; r < _rowCount; r++) { rowY[r] = acc; acc += rowH[r]; }
-
-            foreach (var p in _placements)
+            for (int pass = 0; pass < 3; pass++)
             {
-                if (p.IsName) { p.C.SetBounds(NameX, rowY[p.Row], NameW, LineH); continue; }
-                int h = p.Wide ? rowH[p.Row] : LineH;
-                p.C.SetBounds(ColX(p.Part), rowY[p.Row], ColW(p.Part, valueW), h);
+                int widthBefore = ClientSize.Width;
+                LayoutPass();
+                if (ClientSize.Width == widthBefore) break; // scrollbar state settled
             }
-
-            _body.Size = new Size(ClientSize.Width, acc);
         }
         finally { _measuring = false; }
+    }
+
+    /// <summary>One layout pass at the current width. Sets the scrollable height,
+    /// which may toggle the scrollbar and so change the width for the next pass.</summary>
+    private void LayoutPass()
+    {
+        if (_doc is null || _rowCount == 0)
+        {
+            _body.Size = new Size(ClientSize.Width, 0);
+            AutoScrollMinSize = Size.Empty;
+            return;
+        }
+
+        int valueW = Math.Max(60, ClientSize.Width - FixedW);
+
+        if (valueW != _cacheWidth) { _heightCache.Clear(); _cacheWidth = valueW; }
+        var rowH = new int[_rowCount];
+        Array.Fill(rowH, LineH + VPad);
+        foreach (var p in _placements)
+            if (p.Wide && p.C is TextBox tb)
+                rowH[p.Row] = MeasureWide(tb, valueW);
+
+        var rowY = new int[_rowCount];
+        int acc = 0;
+        for (int r = 0; r < _rowCount; r++) { rowY[r] = acc; acc += rowH[r]; }
+
+        foreach (var p in _placements)
+        {
+            if (p.IsName) { p.C.SetBounds(NameX, rowY[p.Row], NameW, LineH); continue; }
+            int h = p.Wide ? rowH[p.Row] : LineH;
+            p.C.SetBounds(ColX(p.Part), rowY[p.Row], ColW(p.Part, valueW), h);
+        }
+
+        // When the record is taller than the viewport, extend the scrollable area by
+        // half a page of blank space below the last field, so the cataloguer can pull
+        // the last few fields up into the middle instead of them being pinned at the
+        // very bottom edge (user request). Short records that already fit get no slack.
+        int viewport = ClientSize.Height;
+        int slack = acc > viewport ? viewport / 2 : 0;
+        int total = acc + slack;
+        _body.Size = new Size(ClientSize.Width, total);
+        AutoScrollMinSize = new Size(0, total); // refresh the scroll range now, not on the next resize
     }
 
     // Memoize wrapped-row heights: on a rebuild most rows' text/width are unchanged,
