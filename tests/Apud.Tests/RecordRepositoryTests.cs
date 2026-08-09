@@ -66,44 +66,22 @@ public class RecordRepositoryTests : IDisposable
     }
 
     [Fact]
-    public void SaveDraft_inserts_a_new_record_out_of_search()
+    public void DeleteAllDrafts_removes_draft_rows_but_keeps_pushed_records()
     {
-        var stored = new StoredRecord("BIB", Parse(Monograph)) { Status = RecordStatus.Pushed };
-        Repo.SaveDraft(stored); // Ctrl+S on a brand-new record
-
-        Assert.NotEqual(0, stored.Id);
-        Assert.Equal(RecordStatus.Draft, stored.Status);
-        Assert.Equal(RecordStatus.Draft, Repo.Load(stored.Id)!.Status);
-        Assert.DoesNotContain(stored.Id, Repo.Search("BIB", "sincrotron")); // drafts are invisible
-    }
-
-    [Fact]
-    public void SaveDraft_demotes_a_pushed_record_and_pulls_it_from_search()
-    {
-        var stored = new StoredRecord("BIB", Parse(Monograph)) { Status = RecordStatus.Pushed };
-        Repo.Insert(stored);
-        Assert.Contains(stored.Id, Repo.Search("BIB", "sincrotron")); // pushed → searchable
-
-        Repo.SaveDraft(stored); // editing then Ctrl+S demotes until re-pushed
-
-        Assert.Equal(RecordStatus.Draft, Repo.Load(stored.Id)!.Status);
-        Assert.DoesNotContain(stored.Id, Repo.Search("BIB", "sincrotron"));
-    }
-
-    [Fact]
-    public void DraftIds_returns_only_drafts_across_both_bases()
-    {
+        // Drafts are app files now, not DB rows; DeleteAllDrafts purges any legacy
+        // draft rows an older build left, leaving the pushed catalogue untouched.
         var pushed = new StoredRecord("BIB", Parse(Monograph)) { Status = RecordStatus.Pushed };
         Repo.Insert(pushed);
-        var bibDraft = new StoredRecord("BIB", Parse(Monograph.Replace("=001  1\n", ""))); // a draft usually has no 001 yet
-        Repo.SaveDraft(bibDraft);
-        var autDraft = new StoredRecord("AUT", Parse("=LDR  00000nz  a2200000n  4500\n=100  1\\$aMoreno, Matías\n"));
-        Repo.SaveDraft(autDraft);
+        var draft = new StoredRecord("AUT", Parse("=LDR  00000nz  a2200000n  4500\n=100  1\\$aMoreno, Matías\n"))
+        { Status = RecordStatus.Draft };
+        Repo.Insert(draft);
 
-        var ids = Repo.DraftIds();
+        int removed = Repo.DeleteAllDrafts();
 
-        Assert.Equal(new[] { autDraft.Id, bibDraft.Id }.OrderBy(x => x), ids.OrderBy(x => x));
-        Assert.DoesNotContain(pushed.Id, ids); // pushed records are not reopened
+        Assert.Equal(1, removed);
+        Assert.Null(Repo.Load(draft.Id));                             // the draft row is gone
+        Assert.NotNull(Repo.Load(pushed.Id));                         // the pushed record remains
+        Assert.Contains(pushed.Id, Repo.Search("BIB", "sincrotron")); // and is still searchable
     }
 
     [Fact]

@@ -26,6 +26,12 @@ public sealed class EditorDocument
     public StoredRecord Stored { get; }
     public MarcRecord Record => Stored.Record;
 
+    /// <summary>When this record is a saved draft, the id of its file in the
+    /// <see cref="DraftStore"/> — so re-saving overwrites the same file and a push
+    /// can delete it. Null for records that live in the catalogue DB, or a brand-new
+    /// record that has never been saved as a draft.</summary>
+    public string? DraftId { get; set; }
+
     private readonly Stack<Memento> _undo = new();
     private readonly Stack<Memento> _redo = new();
 

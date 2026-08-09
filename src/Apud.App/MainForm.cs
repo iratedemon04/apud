@@ -105,6 +105,7 @@ public sealed class MainForm : Form
 
     private ApudDatabase? _db;
     private RecordRepository? _repo;
+    private DraftStore? _drafts;            // per-catalogue draft .mrk files (not in the DB)
     private string? _catalogPath;          // the open .db path; MARC_OUT sits beside it
     private string _currentBase = "BIB"; // the single source of truth for the active base (menu + Ctrl+B drive it)
     private EditorDocument? _currentDoc; // the record showing in the editor
@@ -519,12 +520,13 @@ public sealed class MainForm : Form
     /// a catalogue with no server never sees it.</summary>
     private void OnFormClosing(object? sender, FormClosingEventArgs e)
     {
-        // Unsaved work is lost on close: a brand-new record never saved (Id 0), or a
-        // record with edits since its last save. Only SAVED drafts survive a restart
-        // (they reload from the DB on catalogue open), so warn — the Warning icon
-        // sounds the system ding. No/Cancel keeps Apud open so the user can Ctrl+D.
+        // Unsaved work is lost on close: a brand-new record never saved, or a record
+        // with edits since its last save (both are Dirty — a never-saved record has
+        // no saved signature). A SAVED, unedited draft is not dirty and reloads from
+        // its file next time, so it does not warn. The Warning icon sounds the ding;
+        // No/Cancel keeps Apud open so the user can Ctrl+D.
         int unsaved = _openList.Items.Cast<ListViewItem>()
-            .Count(i => i.Tag is EditorDocument { Dirty: true } or EditorDocument { Stored.Id: 0 });
+            .Count(i => i.Tag is EditorDocument { Dirty: true });
         if (unsaved > 0 && MessageBox.Show(this,
                 $"{unsaved} record(s) have unsaved changes that will be lost.\n\n" +
                 "Save them as drafts (Ctrl+D) to keep them. Close Apud anyway?",
@@ -840,7 +842,13 @@ public sealed class MainForm : Form
         _db?.Dispose();
         _db = db;
         _repo = new RecordRepository(db);
+        _drafts = new DraftStore(path);
         _catalogPath = path;
+
+        // Drafts are app files now, not DB rows: purge any legacy status='draft'
+        // rows an older build may have left (user, 2026-08-08 — "they don't exist
+        // anymore"). Pushed records, the real catalogue, are untouched.
+        _repo.DeleteAllDrafts();
 
         // A different catalogue means different record ids: everything on
         // screen belonged to the old one.
@@ -1138,22 +1146,17 @@ public sealed class MainForm : Form
         return item;
     }
 
-    /// <summary>Repopulates the sidebar with every draft in the catalogue. Drafts
-    /// are excluded from search, so this is how an unfinished draft survives a close
-    /// + reopen — the working set is restored on catalogue open. Added quietly (no
-    /// selection) so opening a catalogue still lands on the search view, not a record.</summary>
+    /// <summary>Repopulates the sidebar with every saved draft for this catalogue,
+    /// read from its draft files. This is how an unfinished draft survives a close +
+    /// reopen. Added quietly (no selection) so opening a catalogue still lands on the
+    /// search view, not a record.</summary>
     private void LoadDraftsIntoSidebar()
     {
-        if (_repo is null) return;
-        var open = new HashSet<long>();
-        foreach (ListViewItem existing in _openList.Items)
-            if (existing.Tag is EditorDocument d) open.Add(d.Stored.Id);
-
-        foreach (long id in _repo.DraftIds())
+        if (_drafts is null) return;
+        foreach (var (draftId, @base, record) in _drafts.LoadAll())
         {
-            if (!open.Add(id)) continue; // already open (e.g. re-open of same catalogue)
-            if (_repo.Load(id) is { } stored)
-                _openList.Items.Add(MakeSidebarItem(new EditorDocument(stored)));
+            var doc = new EditorDocument(new StoredRecord(@base, record)) { DraftId = draftId };
+            _openList.Items.Add(MakeSidebarItem(doc));
         }
     }
 
@@ -1725,6 +1728,9 @@ public sealed class MainForm : Form
         // re-render and refresh. Warnings (if any) were shown against the pre-push
         // layout during the run; the summary reports their count.
         doc.MarkSaved();
+        // The record is now in the catalogue — its draft file (if it had one) has
+        // done its job and would otherwise reopen as a duplicate. Remove it.
+        if (doc.DraftId is not null) { _drafts?.Delete(doc.DraftId); doc.DraftId = null; }
         _pushesSinceSync++; // for the on-exit "back up first?" prompt
         RenderRecord();
         UpdateSidebarItem(doc);
@@ -2175,6 +2181,17 @@ public sealed class MainForm : Form
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
         var doc = _currentDoc;
 
+        // A saved draft is a working file, not catalogue data — discard it (delete
+        // its file) with no warning; it simply will not reload next time.
+        if (doc.DraftId is not null)
+        {
+            _drafts?.Delete(doc.DraftId);
+            doc.DraftId = null;
+            CloseOpenRecord(doc);
+            SetMessage("Draft discarded.");
+            return;
+        }
+
         if (doc.Stored.Id == 0)
         {
             SetMessage("This record was never saved — use Remove in the sidebar to close it.");
@@ -2284,21 +2301,31 @@ public sealed class MainForm : Form
         if (!RequireCatalogue()) return;
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
         _grid.CommitFocused();
+        var doc = _currentDoc;
 
-        try
+        // A pushed record IS in the catalogue — "save a draft" of it doesn't apply;
+        // its save action is Ctrl+L, which updates the catalogue copy in place.
+        // Drafts (Ctrl+D) are only for records not yet in the catalogue.
+        if (doc.Stored.Id != 0)
         {
-            _repo.SaveDraft(_currentDoc.Stored);
-        }
-        catch (Microsoft.Data.Sqlite.SqliteException ex)
-        {
-            SetMessage($"Not saved: {ex.Message}");
+            SetMessage("This record is in the catalogue — press Ctrl+L to save your changes to it.");
             return;
         }
 
-        _currentDoc.MarkSaved();
-        UpdateSidebarItem(_currentDoc);
+        try
+        {
+            doc.DraftId = _drafts!.Save(doc.DraftId, doc.Stored.Base, doc.Record);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            SetMessage($"Draft not saved: {ex.Message}");
+            return;
+        }
+
+        doc.MarkSaved();
+        UpdateSidebarItem(doc);
         UpdateHeader();
-        SetMessage("Saved as draft.");
+        SetMessage("Saved as draft — it will reopen next time you open this catalogue.");
     }
 
     private void UpdateSidebarItem(EditorDocument doc)

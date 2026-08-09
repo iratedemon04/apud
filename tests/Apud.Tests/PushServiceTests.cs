@@ -195,12 +195,12 @@ public class PushServiceTests : IDisposable
         PushedAuthorityNumbered("Alpha", "10");
         PushedAuthorityNumbered("Beta", "20");
 
-        // A third authority saved as a DRAFT (never pushed) carrying an imported 001.
+        // A third authority as an unpushed DRAFT (in-memory, Id 0) carrying an
+        // imported 001. Push inserts it; it is not in the DB until then.
         var r = new MarcRecord { Leader = "00000nz  a2200000n  4500" };
         r.Fields.Add(new MarcField("001") { ControlData = "999" });
         r.Fields.Add(Data("100", '1', ' ', ('a', "Gamma")));
         var draft = new StoredRecord("AUT", r) { Status = RecordStatus.Draft };
-        Repo.SaveDraft(draft);
 
         // Delete the draft's 001 and push: it earns the next number after the OTHER
         // authorities (20 → 21), not its own imported 999 (task 19, AUT-only).
