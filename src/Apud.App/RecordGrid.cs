@@ -395,12 +395,12 @@ public sealed class RecordGrid : Panel, IMessageFilter
         if (_suspendCommit || !box.Focused || box.Tag is not BoxSpec spec) return;
         if (box.MaxLength <= 0 || box.TextLength < box.MaxLength) return;
 
-        // A filled indicators (2) or subfield-code (1) box hands off to the next box
-        // so the cataloguer types straight through. Skip a code box on an empty field
-        // (SubfieldIndex -1): committing it CREATES the subfield (structural), which
-        // goes through the normal path, not this in-place hop.
-        bool hop = spec.Part == BoxPart.Ind
-                   || (spec.Part == BoxPart.Code && spec.SubfieldIndex >= 0);
+        // A filled fixed-width box hands off to the next so the cataloguer types
+        // straight through, left to right, no arrows: the 3-char tag -> first
+        // indicator -> second indicator -> subfield code -> value. The code hop fires
+        // even on a just-created subfield (F7): typing its code creates the subfield
+        // (structural) and MoveNext lands the caret in the body — exactly the flow.
+        bool hop = spec.Part is BoxPart.Tag or BoxPart.Ind or BoxPart.Code;
         if (hop) BeginInvoke(() => MoveNext(forward: true));
     }
 
