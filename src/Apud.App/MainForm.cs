@@ -519,6 +519,21 @@ public sealed class MainForm : Form
     /// a catalogue with no server never sees it.</summary>
     private void OnFormClosing(object? sender, FormClosingEventArgs e)
     {
+        // Unsaved work is lost on close: a brand-new record never saved (Id 0), or a
+        // record with edits since its last save. Only SAVED drafts survive a restart
+        // (they reload from the DB on catalogue open), so warn — the Warning icon
+        // sounds the system ding. No/Cancel keeps Apud open so the user can Ctrl+D.
+        int unsaved = _openList.Items.Cast<ListViewItem>()
+            .Count(i => i.Tag is EditorDocument { Dirty: true } or EditorDocument { Stored.Id: 0 });
+        if (unsaved > 0 && MessageBox.Show(this,
+                $"{unsaved} record(s) have unsaved changes that will be lost.\n\n" +
+                "Save them as drafts (Ctrl+D) to keep them. Close Apud anyway?",
+                "Unsaved drafts", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+        {
+            e.Cancel = true;
+            return;
+        }
+
         if (_repo is null || _pushesSinceSync == 0) return;
         var settings = SyncSettings.Load(_repo);
         if (!settings.IsConfigured) return;

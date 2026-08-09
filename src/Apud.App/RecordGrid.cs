@@ -22,7 +22,7 @@ namespace Apud.App;
 /// All structure/validation/authority logic stays in the model. Row shaping is
 /// <see cref="RecordLayout"/> (pure, unit-tested).
 /// </summary>
-public sealed class RecordGrid : Panel, IMessageFilter
+public sealed class RecordGrid : Panel
 {
     // Visual-fidelity constants (docs/UI-REWRITE-PLAN.md) — reproduce the old
     // DataGridView value column 1:1.
@@ -48,7 +48,6 @@ public sealed class RecordGrid : Panel, IMessageFilter
     [DllImport("user32.dll")]
     private static extern int SendMessage(IntPtr hWnd, int msg, bool wParam, int lParam);
     private const int WM_SETREDRAW = 0x000B;
-    private const int WM_MOUSEWHEEL = 0x020A;
 
     private readonly Panel _body; // inner content panel; this (AutoScroll) scrolls it
 
@@ -84,47 +83,25 @@ public sealed class RecordGrid : Panel, IMessageFilter
         BackColor = SystemColors.Window;
         DoubleBuffered = true;
         _body = new Panel { Location = new Point(0, 0), BackColor = SystemColors.Window };
+        _body.MouseWheel += OnChildWheel; // empty area below the last field still scrolls
         Controls.Add(_body);
         ClientSizeChanged += (_, _) => LayoutRows();
     }
 
     // ---------- mouse-wheel routing ----------
     //
-    // WM_MOUSEWHEEL is delivered to the FOCUSED control (a value/tag box while
-    // editing), not the control under the pointer — and a single-line box ignores
-    // it while a wrapped value box has no scrollbar to consume it, so the wheel did
-    // nothing unless the pointer was over the AutoScroll thumb itself. An
-    // app-wide message filter (the standard idiom for "scroll whatever's under the
-    // cursor") catches the wheel whenever the pointer is over this grid and scrolls
-    // it, regardless of focus. Registered only while the handle lives.
-
-    protected override void OnHandleCreated(EventArgs e)
+    // A multiline value box (and a focused micro box) swallows WM_MOUSEWHEEL, so the
+    // wheel did nothing unless the pointer sat over a column that ignores it (a
+    // name label or the fixed micro cells). Forward every child's wheel to this
+    // AutoScroll panel and mark it Handled so the box does not also scroll itself —
+    // now the wheel works over the value text too, which is where it matters most.
+    private void OnChildWheel(object? sender, MouseEventArgs e)
     {
-        base.OnHandleCreated(e);
-        Application.AddMessageFilter(this);
-    }
-
-    protected override void OnHandleDestroyed(EventArgs e)
-    {
-        Application.RemoveMessageFilter(this);
-        base.OnHandleDestroyed(e);
-    }
-
-    bool IMessageFilter.PreFilterMessage(ref Message m)
-    {
-        if (m.Msg != WM_MOUSEWHEEL || !IsHandleCreated || !Visible) return false;
-
-        // WM_MOUSEWHEEL's lParam carries the pointer in SCREEN coordinates.
-        int lp = (int)(long)m.LParam;
-        var screen = new Point((short)(lp & 0xFFFF), (short)((lp >> 16) & 0xFFFF));
-        if (!ClientRectangle.Contains(PointToClient(screen))) return false;
-
-        int delta = (short)(((long)m.WParam >> 16) & 0xFFFF);
         int lines = SystemInformation.MouseWheelScrollLines;
         int step = (lines <= 0 ? 3 : lines) * (LineH + VPad); // "n lines" per wheel notch
-        int offset = -AutoScrollPosition.Y - delta / 120 * step; // getter is negative; setter positive
+        int offset = -AutoScrollPosition.Y - e.Delta / 120 * step; // getter negative; setter positive
         AutoScrollPosition = new Point(-AutoScrollPosition.X, offset); // panel clamps to range
-        return true; // consume: don't let the focused box swallow it
+        if (e is HandledMouseEventArgs h) h.Handled = true;
     }
 
     public EditorDocument? Document
@@ -241,6 +218,7 @@ public sealed class RecordGrid : Panel, IMessageFilter
         lbl.MouseDown += (_, e) => OnSelDown(lbl, e);
         lbl.MouseMove += (_, e) => OnSelMove(lbl, e);
         lbl.MouseUp += (_, _) => OnSelUp();
+        lbl.MouseWheel += OnChildWheel;
         _labelPool.Add(lbl);
         _body.Controls.Add(lbl);
         used++;
@@ -263,6 +241,7 @@ public sealed class RecordGrid : Panel, IMessageFilter
         box.MouseDown += (_, e) => OnSelDown(box, e);
         box.MouseMove += (_, e) => OnSelMove(box, e);
         box.MouseUp += (_, _) => OnSelUp();
+        box.MouseWheel += OnChildWheel;
         return box;
     }
 
