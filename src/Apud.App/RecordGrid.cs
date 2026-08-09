@@ -22,7 +22,7 @@ namespace Apud.App;
 /// All structure/validation/authority logic stays in the model. Row shaping is
 /// <see cref="RecordLayout"/> (pure, unit-tested).
 /// </summary>
-public sealed class RecordGrid : Panel
+public sealed class RecordGrid : Panel, IMessageFilter
 {
     // Visual-fidelity constants (docs/UI-REWRITE-PLAN.md) — reproduce the old
     // DataGridView value column 1:1.
@@ -48,6 +48,7 @@ public sealed class RecordGrid : Panel
     [DllImport("user32.dll")]
     private static extern int SendMessage(IntPtr hWnd, int msg, bool wParam, int lParam);
     private const int WM_SETREDRAW = 0x000B;
+    private const int WM_MOUSEWHEEL = 0x020A;
 
     private readonly Panel _body; // inner content panel; this (AutoScroll) scrolls it
 
@@ -91,17 +92,49 @@ public sealed class RecordGrid : Panel
     // ---------- mouse-wheel routing ----------
     //
     // A multiline value box (and a focused micro box) swallows WM_MOUSEWHEEL, so the
-    // wheel did nothing unless the pointer sat over a column that ignores it (a
-    // name label or the fixed micro cells). Forward every child's wheel to this
-    // AutoScroll panel and mark it Handled so the box does not also scroll itself —
-    // now the wheel works over the value text too, which is where it matters most.
+    // wheel did nothing over the field text — only the name-label / micro columns
+    // scrolled, because those ignore it and let it bubble to this AutoScroll panel.
+    // Two belt-and-suspenders mechanisms with different failure modes cover it:
+    //   1. A message filter that scrolls whenever the POINTER is over the grid,
+    //      regardless of which control has focus (the canonical fix, position-based).
+    //   2. A per-child MouseWheel handler that scrolls and marks the event Handled,
+    //      covering the box the wheel is delivered to directly.
+    // The filter consumes the message when it acts, so the two never double-scroll.
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        Application.AddMessageFilter(this);
+    }
+
+    protected override void OnHandleDestroyed(EventArgs e)
+    {
+        Application.RemoveMessageFilter(this);
+        base.OnHandleDestroyed(e);
+    }
+
+    bool IMessageFilter.PreFilterMessage(ref Message m)
+    {
+        if (m.Msg != WM_MOUSEWHEEL || !IsHandleCreated || !Visible) return false;
+        // Cursor.Position + RectangleToScreen is more robust than decoding lParam
+        // (no sign/multi-monitor pitfalls); scroll only when the pointer is over us.
+        if (!RectangleToScreen(ClientRectangle).Contains(Cursor.Position)) return false;
+        ScrollByWheel((short)(((long)m.WParam >> 16) & 0xFFFF));
+        return true; // consume: don't let the focused/hovered box swallow it
+    }
+
     private void OnChildWheel(object? sender, MouseEventArgs e)
+    {
+        ScrollByWheel(e.Delta);
+        if (e is HandledMouseEventArgs h) h.Handled = true; // stop the box scrolling itself
+    }
+
+    private void ScrollByWheel(int delta)
     {
         int lines = SystemInformation.MouseWheelScrollLines;
         int step = (lines <= 0 ? 3 : lines) * (LineH + VPad); // "n lines" per wheel notch
-        int offset = -AutoScrollPosition.Y - e.Delta / 120 * step; // getter negative; setter positive
+        int offset = -AutoScrollPosition.Y - delta / 120 * step; // getter negative; setter positive
         AutoScrollPosition = new Point(-AutoScrollPosition.X, offset); // panel clamps to range
-        if (e is HandledMouseEventArgs h) h.Handled = true;
     }
 
     public EditorDocument? Document
