@@ -255,7 +255,7 @@ public sealed class RecordRepository
             r.IsDBNull(6) ? "" : FirstSubfieldValue(r.GetString(6)),
             YearOf(r.IsDBNull(7) ? null : r.GetString(7)),
             DateTime.Parse(r.GetString(4)).ToUniversalTime(),
-            r.IsDBNull(8) ? "" : FirstSubfieldValue(r.GetString(8)),
+            r.IsDBNull(8) ? "" : ClassificationValue(r.GetString(8)),
             r.IsDBNull(9) ? "" : FirstSubfieldValue(r.GetString(9)));
     }
 
@@ -667,6 +667,23 @@ public sealed class RecordRepository
     {
         var chunks = packed.Split(MarcConstants.SubfieldDelimiter, StringSplitOptions.RemoveEmptyEntries);
         return chunks.Length == 0 ? "" : chunks[0].Substring(1);
+    }
+
+    /// <summary>Classification for an authority list row: the number ($a) followed by
+    /// the item number / cutter ($b) when the record carries one (some do), space-
+    /// joined — e.g. "823.912 M672". Falls back to the first subfield when there is no
+    /// $a so it never regresses a record shaped differently.</summary>
+    private static string ClassificationValue(string packed)
+    {
+        string number = "", cutter = "";
+        foreach (var chunk in packed.Split(MarcConstants.SubfieldDelimiter, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (chunk.Length == 0) continue;
+            if (chunk[0] == 'a' && number.Length == 0) number = chunk.Substring(1);
+            else if (chunk[0] == 'b' && cutter.Length == 0) cutter = chunk.Substring(1);
+        }
+        if (number.Length == 0) number = FirstSubfieldValue(packed);
+        return cutter.Length == 0 ? number : $"{number} {cutter}".Trim();
     }
 
     /// <summary>The full heading: every subfield value joined by "--", so an

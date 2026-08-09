@@ -166,6 +166,19 @@ public class RecordRepositoryTests : IDisposable
     }
 
     [Fact]
+    public void Authority_classification_appends_the_b_subfield_cutter_when_present()
+    {
+        var aut = Parse(
+            "=LDR  00000nz  a2200000n  4500\n" +
+            "=001  43\n" +
+            "=082  \\4$a823.912$bM672\n" + // $b carries the cutter (some records have one)
+            "=150  \\\\$aNovela inglesa\n");
+        Repo.Insert(new StoredRecord("AUT", aut));
+
+        Assert.Equal("823.912 M672", Repo.List("AUT").Single().Classification);
+    }
+
+    [Fact]
     public void ListPage_and_Count_page_a_base_without_loading_it_all()
     {
         for (int cn = 1; cn <= 5; cn++)
