@@ -25,25 +25,40 @@ namespace Apud.App;
 public sealed class RecordGrid : Panel, IMessageFilter
 {
     // Visual-fidelity constants (docs/UI-REWRITE-PLAN.md) — reproduce the old
-    // DataGridView value column 1:1.
-    private static readonly Font MonoValue = new("Consolas", 9.75f, FontStyle.Bold);
-    private static readonly Font MonoTag = new("Consolas", 9.75f, FontStyle.Bold | FontStyle.Underline);
-    private static readonly Font MonoInd = new("Consolas", 9.75f);
-    private static readonly Font MonoCode = new("Consolas", 9.75f, FontStyle.Bold | FontStyle.Underline);
-    private static readonly Font NameFont = new("Segoe UI", 8.25f, FontStyle.Italic);
+    // DataGridView value column 1:1. The point sizes and every pixel metric below
+    // are the 1.0 baseline; Ctrl++/Ctrl+- scale them through _fontScale so the whole
+    // grid (fonts AND geometry) grows/shrinks together — see BuildFonts / ZoomBy.
+    private const float BaseValuePt = 9.75f, BaseNamePt = 8.25f;
     private static readonly Color ApudBlue = Color.FromArgb(225, 238, 250);
 
-    private const int NameW = 140, TagW = 42, IndW = 34, CodeW = 26;
-    private const int FixedW = NameW + TagW + IndW + CodeW;
-    private const int NameX = 0, TagX = NameW, IndX = NameW + TagW, CodeX = NameW + TagW + IndW, ValueX = FixedW;
+    // Instance fonts, rebuilt by BuildFonts whenever the zoom changes.
+    private Font MonoValue = null!, MonoTag = null!, MonoInd = null!, MonoCode = null!, NameFont = null!;
+
+    // Zoom factor for the editor grid (Ctrl++ / Ctrl+-). Clamped in ZoomBy. Lives
+    // for the RecordGrid's lifetime, so the level persists across records this session.
+    private float _fontScale = 1f;
+
+    // Scaled pixel geometry (baseline metrics × _fontScale). Fonts and layout must
+    // scale in lockstep or wrapped rows clip / columns misalign.
+    private int Scaled(int baseline) => Math.Max(1, (int)Math.Round(baseline * _fontScale));
+    private int NameW => Scaled(140);
+    private int TagW => Scaled(42);
+    private int IndW => Scaled(34);
+    private int CodeW => Scaled(26);
+    private int FixedW => NameW + TagW + IndW + CodeW;
+    private int NameX => 0;
+    private int TagX => NameW;
+    private int IndX => NameW + TagW;
+    private int CodeX => NameW + TagW + IndW;
+    private int ValueX => FixedW;
 
     // Spike-1 parity constants: the raw text measure runs ~2px short of the old
     // DataGridView row, and its cell reserved a few px of horizontal padding (so it
     // wrapped slightly earlier). Under-estimating width errs toward a taller row
     // (never clips); the screenshot-parity gate tunes these.
-    private const int VPad = 2;
-    private const int HInset = 8;
-    private const int LineH = 17;
+    private int VPad => Scaled(2);
+    private int HInset => Scaled(8);
+    private int LineH => Scaled(17);
 
     [DllImport("user32.dll")]
     private static extern int SendMessage(IntPtr hWnd, int msg, bool wParam, int lParam);
@@ -79,6 +94,7 @@ public sealed class RecordGrid : Panel, IMessageFilter
 
     public RecordGrid()
     {
+        BuildFonts();
         Dock = DockStyle.Fill;
         AutoScroll = true;
         BackColor = SystemColors.Window;
@@ -184,6 +200,7 @@ public sealed class RecordGrid : Panel, IMessageFilter
                     if (spec.Name is not null)
                     {
                         var lbl = AcquireLabel(ref label);
+                        lbl.Font = NameFont; // reassign so pooled labels track the zoom
                         lbl.Text = spec.Name;
                         lbl.Tag = spec.FieldIndex;
                         lbl.BackColor = SystemColors.Window;
@@ -278,9 +295,79 @@ public sealed class RecordGrid : Panel, IMessageFilter
         return box;
     }
 
+    // Fonts retired by the PREVIOUS BuildFonts. They stay alive one extra generation
+    // because the pooled boxes keep using them until the Rebuild that follows a zoom
+    // re-points every box; by the next zoom that Rebuild has happened, so disposing
+    // them then is safe (never disposing a Font a live control still paints with).
+    private Font[]? _retiredFonts;
+
+    /// <summary>(Re)creates the grid's fonts at the current zoom. Called once from
+    /// the ctor and again on every Ctrl++/Ctrl+-.</summary>
+    private void BuildFonts()
+    {
+        var retiring = new[] { MonoValue, MonoTag, MonoInd, MonoCode, NameFont };
+        float vpt = BaseValuePt * _fontScale, npt = BaseNamePt * _fontScale;
+        MonoValue = new Font("Consolas", vpt, FontStyle.Bold);
+        MonoTag = new Font("Consolas", vpt, FontStyle.Bold | FontStyle.Underline);
+        MonoInd = new Font("Consolas", vpt);
+        MonoCode = new Font("Consolas", vpt, FontStyle.Bold | FontStyle.Underline);
+        NameFont = new Font("Segoe UI", npt, FontStyle.Italic);
+        if (_retiredFonts is not null) foreach (var f in _retiredFonts) f?.Dispose();
+        _retiredFonts = retiring[0] is null ? null : retiring; // first call's set is all null
+    }
+
+    /// <summary>The editor's zoom factor (Ctrl++/Ctrl+-). The host reads it to persist
+    /// the level and writes it back on launch to restore it. Assigning applies the
+    /// zoom silently (no <see cref="ZoomChanged"/>); only a user keystroke fires that.</summary>
+    public float FontScale
+    {
+        get => _fontScale;
+        set => ApplyScale(value);
+    }
+
+    /// <summary>Raised when the user changes the zoom via Ctrl++/Ctrl+- (not when the
+    /// host restores it), so the host can persist the new level.</summary>
+    public event EventHandler? ZoomChanged;
+
+    /// <summary>Grow the editor text a step (the "zoom in" command).</summary>
+    public void ZoomIn() => ZoomBy(+0.1f);
+
+    /// <summary>Shrink the editor text a step (the "zoom out" command).</summary>
+    public void ZoomOut() => ZoomBy(-0.1f);
+
+    /// <summary>Back to 100% (the "reset zoom" command).</summary>
+    public void ZoomReset()
+    {
+        float before = _fontScale;
+        ApplyScale(1f);
+        if (Math.Abs(_fontScale - before) > 0.001f) ZoomChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void ZoomBy(float delta)
+    {
+        float before = _fontScale;
+        ApplyScale(_fontScale + delta);
+        if (Math.Abs(_fontScale - before) > 0.001f) ZoomChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Sets the zoom (fonts and the pixel geometry that must track them).
+    /// Clamped so it can't collapse or blow up; the wrapped-row height cache is
+    /// invalidated because the metrics changed. Keeps the caret where it was via a
+    /// focus-preserving rebuild.</summary>
+    private void ApplyScale(float s)
+    {
+        s = Math.Clamp(s, 0.7f, 3f);
+        if (Math.Abs(s - _fontScale) < 0.001f) return; // no change (or already at a clamp end)
+        _fontScale = s;
+        BuildFonts();
+        _heightCache.Clear();
+        _cacheWidth = -1;
+        Rebuild(preserveFocus: true);
+    }
+
     /// <summary>Re-points a pooled box at a spec: its text, identity, font/colour,
     /// and length rule. Multiline never changes (pools are split by kind).</summary>
-    private static void ConfigureBox(TextBox box, BoxSpec spec)
+    private void ConfigureBox(TextBox box, BoxSpec spec)
     {
         box.Tag = spec;
         box.BackColor = SystemColors.Window;
@@ -296,7 +383,7 @@ public sealed class RecordGrid : Panel, IMessageFilter
         if (box.Text != spec.Text) box.Text = spec.Text;
     }
 
-    private static int ColX(BoxPart part) => part switch
+    private int ColX(BoxPart part) => part switch
     {
         BoxPart.Tag => TagX,
         BoxPart.Ind => IndX,
@@ -304,7 +391,7 @@ public sealed class RecordGrid : Panel, IMessageFilter
         _ => ValueX,
     };
 
-    private static int ColW(BoxPart part, int valueW) => part switch
+    private int ColW(BoxPart part, int valueW) => part switch
     {
         BoxPart.Tag => TagW,
         BoxPart.Ind => IndW,

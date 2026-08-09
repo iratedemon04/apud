@@ -31,6 +31,12 @@ public sealed class AppState
     /// reads false, so a fresh install shows the wizard exactly once.</summary>
     public bool FirstRunDone { get; set; }
 
+    /// <summary>The record editor's zoom factor (Ctrl++/Ctrl+-), persisted so the
+    /// chosen text size survives a restart. Defaults to 1.0 (100%); an older ui.json
+    /// without the key keeps that default, and the grid clamps any stray value to its
+    /// own range on apply.</summary>
+    public float FontScale { get; set; } = 1f;
+
     public static AppState Load() => LoadFrom(DefaultPath);
     public void Save() => SaveTo(DefaultPath);
 

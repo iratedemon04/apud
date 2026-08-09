@@ -44,7 +44,7 @@ public sealed class MainForm : Form
     private const int ListPageSize = 1000;
 
     private readonly Label _recordHeader;
-    private readonly RecordGrid _grid;             // textbox-grid editor (replaces the DataGridView)
+    private readonly RecordGrid _grid = new();     // textbox-grid editor (replaces the DataGridView); inited here so the command lambdas can capture it
     private readonly ListView _findings;          // Ctrl+W/Ctrl+L output, click to jump
 
     // The scope dropdown is base-aware: BIB and AUT index completely different
@@ -181,6 +181,12 @@ public sealed class MainForm : Form
         // (user, 2026-08-08 — close moved to Ctrl+C / Ctrl+Alt+C).
         _commands.Add(new Command { Id = "record.delete", Name = "&Delete Record/Draft...", Context = CommandContext.Editor, DefaultKey = "Ctrl+Delete", Execute = DeleteRecord });
 
+        // View / Window — editor text zoom (rebindable, persisted). The chords use the
+        // "Plus"/"Minus" aliases because "Ctrl++" can't be parsed (splitting on '+').
+        _commands.Add(new Command { Id = "view.zoom-in", Name = "Zoom &In", Context = CommandContext.Editor, DefaultKey = "Ctrl+Plus", Execute = () => _grid.ZoomIn() });
+        _commands.Add(new Command { Id = "view.zoom-out", Name = "Zoom &Out", Context = CommandContext.Editor, DefaultKey = "Ctrl+Minus", Execute = () => _grid.ZoomOut() });
+        _commands.Add(new Command { Id = "view.zoom-reset", Name = "&Reset Zoom", Context = CommandContext.Editor, DefaultKey = "Ctrl+0", Execute = () => _grid.ZoomReset() });
+
         _keymap = Keymap.LoadFile(_commands, Path.Combine(AppContext.BaseDirectory, Keymap.FileName));
 
         // ----- menu (rendered from the command table) -----
@@ -242,6 +248,11 @@ public sealed class MainForm : Form
         record.DropDownItems.Add(MenuItem("record.close-all"));
         record.DropDownItems.Add(MenuItem("record.delete"));
 
+        var window = new ToolStripMenuItem("&Window");
+        window.DropDownItems.Add(MenuItem("view.zoom-in"));
+        window.DropDownItems.Add(MenuItem("view.zoom-out"));
+        window.DropDownItems.Add(MenuItem("view.zoom-reset"));
+
         var help = new ToolStripMenuItem("&Help");
         help.DropDownItems.Add(MenuItem("help.field"));
         help.DropDownItems.Add(MenuItem("help.intro"));
@@ -252,6 +263,7 @@ public sealed class MainForm : Form
         _menu.Items.Add(file);
         _menu.Items.Add(@base);
         _menu.Items.Add(record);
+        _menu.Items.Add(window);
         _menu.Items.Add(help);
 
         // ----- sidebar: open records -----
@@ -425,7 +437,8 @@ public sealed class MainForm : Form
         // bold black data text.
         // Module 6: the same page of text is now the editor — in-place edits on
         // the cells themselves, never separate input boxes (user decision).
-        _grid = new RecordGrid();
+        // (_grid is constructed at its field declaration so the zoom command lambdas
+        // can capture it; here we only wire it up.)
         // Each committed edit refreshes the header/sidebar/dirty marker; a refused
         // edit (bad leader length, control/data boundary cross) shows its note.
         _grid.EditCommitted += (_, _) =>
@@ -435,6 +448,9 @@ public sealed class MainForm : Form
             UpdateSidebarItem(_currentDoc);
         };
         _grid.Message += SetMessage;
+        // Restore the persisted editor zoom (Ctrl++/Ctrl+-) and save each user change.
+        _grid.FontScale = _appState.FontScale;
+        _grid.ZoomChanged += (_, _) => { _appState.FontScale = _grid.FontScale; _appState.Save(); };
 
         // Validation output (Module 9): a list docked below the record, hidden
         // until Ctrl+W/Ctrl+L produces findings. Clicking or pressing Enter on a

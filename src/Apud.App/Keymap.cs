@@ -158,6 +158,10 @@ public sealed class Keymap
         ["PgUp"] = Keys.PageUp,
         ["PgDn"] = Keys.PageDown,
         ["Spacebar"] = Keys.Space,
+        // The main-row +/- keys, so a chord can be written "Ctrl+Plus" — "Ctrl++"
+        // can't be parsed (splitting on '+' would leave empty tokens).
+        ["Plus"] = Keys.Oemplus,
+        ["Minus"] = Keys.OemMinus,
     };
 
     internal static bool TryParseChord(string text, out Keys chord)
@@ -215,6 +219,8 @@ public sealed class Keymap
             >= Keys.D0 and <= Keys.D9 => ((char)('0' + (code - Keys.D0))).ToString(),
             Keys.Back => "Backspace",
             Keys.Next => "PageDown", // enum's ToString picks the older name
+            Keys.Oemplus or Keys.Add => "+",
+            Keys.OemMinus or Keys.Subtract => "-",
             _ => code.ToString(),
         });
         return string.Join("+", parts);
