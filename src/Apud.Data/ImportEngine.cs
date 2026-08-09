@@ -45,10 +45,12 @@ public sealed class ImportReport
     public bool CanCommitAsPushed => !HasParseErrors && RunErrors.Count == 0;
 
     /// <summary>
-    /// AS-DRAFTS exists to bring imperfect data in for fixing, so parse errors don't
-    /// block it — but duplicate 001s do (the database can't hold them either way).
+    /// AS-DRAFTS opens the records as unsaved working drafts in the app — never the
+    /// database — so nothing blocks it. Bringing imperfect data in for fixing is the
+    /// whole point, and duplicate or colliding 001s are resolved before the eventual
+    /// push (user, 2026-08-08: import dirty LC records, clean them up, then push).
     /// </summary>
-    public bool CanCommitAsDrafts => RunErrors.Count == 0;
+    public bool CanCommitAsDrafts => true;
 
     internal ImportReport(IReadOnlyList<ImportFileReport> files, IReadOnlyList<string> runErrors, int totalRecords)
     {
@@ -139,17 +141,15 @@ public sealed class ImportEngine
         return new ImportPlan(new ImportReport(fileReports, runErrors, planned.Count), planned);
     }
 
-    /// <summary>Commits an analyzed run in a single transaction (all-or-nothing).</summary>
-    public ImportResult Commit(ImportPlan plan, ImportMode mode)
+    /// <summary>Commits an analyzed run into the catalogue AS PUSHED, in a single
+    /// transaction (all-or-nothing) — the trusted-migration path. Import-as-drafts does
+    /// NOT come here: drafts are opened as unsaved working records in the app and never
+    /// touch the DB (user, 2026-08-08). Blocks if the run cannot commit as pushed.</summary>
+    public ImportResult Commit(ImportPlan plan)
     {
-        bool allowed = mode == ImportMode.AsPushed
-            ? plan.Report.CanCommitAsPushed
-            : plan.Report.CanCommitAsDrafts;
-        if (!allowed)
-            throw new InvalidOperationException(
-                $"Import run has errors and cannot be committed {(mode == ImportMode.AsPushed ? "AS-PUSHED" : "AS-DRAFTS")}; see the report.");
+        if (!plan.Report.CanCommitAsPushed)
+            throw new InvalidOperationException("Import run has errors and cannot be committed AS-PUSHED; see the report.");
 
-        var status = mode == ImportMode.AsPushed ? RecordStatus.Pushed : RecordStatus.Draft;
         var highest = new Dictionary<string, long> { ["BIB"] = 0, ["AUT"] = 0 };
         int bib = 0, aut = 0;
         var ids = new List<long>();
@@ -158,7 +158,7 @@ public sealed class ImportEngine
         using var tx = _repo.BeginTransaction(); // disposed uncommitted = rolled back
         foreach (var p in plan.Records)
         {
-            var stored = new StoredRecord(p.Base, p.Record) { Status = status };
+            var stored = new StoredRecord(p.Base, p.Record) { Status = RecordStatus.Pushed };
             _repo.InsertCore(tx, stored, now);
             ids.Add(stored.Id);
 
@@ -174,4 +174,12 @@ public sealed class ImportEngine
         tx.Commit();
         return new ImportResult(bib + aut, bib, aut, ids);
     }
+
+    /// <summary>The parsed records of a run, to open as unsaved working DRAFTS in the
+    /// sidebar — the import-as-drafts path (dirty LC records to clean up before push).
+    /// Nothing is written: a draft lives only in the session until Ctrl+D saves it to a
+    /// draft file or Ctrl+L pushes it. Parse errors don't block — imperfect data is the
+    /// whole point.</summary>
+    public IReadOnlyList<(string Base, MarcRecord Record)> ParsedRecords(ImportPlan plan) =>
+        plan.Records.Select(p => (p.Base, p.Record)).ToList();
 }

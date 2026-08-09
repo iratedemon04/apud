@@ -69,7 +69,7 @@ public class ImportExportTests : IDisposable
 
         Assert.Single(plan.Report.Files);
         Assert.Equal(1, plan.Report.TotalRecords);     // only the chosen file, not the folder
-        Engine.Commit(plan, ImportMode.AsPushed);
+        Engine.Commit(plan);
 
         Assert.Single(Repo.List("AUT"));
         Assert.Empty(Repo.List("BIB"));                // the unselected bib stayed out
@@ -83,7 +83,7 @@ public class ImportExportTests : IDisposable
         WriteFile("a.mrk", Bib("1", "Uno") + "\n" + Bib("2", "Dos"));
         var plan = Engine.AnalyzeFolder(_dir);
 
-        var result = Engine.Commit(plan, ImportMode.AsDrafts);
+        var result = Engine.Commit(plan);
 
         Assert.Equal(2, result.ImportedIds.Count);
         Assert.All(result.ImportedIds, id => Assert.NotNull(Repo.Load(id)));
@@ -104,7 +104,7 @@ public class ImportExportTests : IDisposable
 
         Assert.False(plan.Report.CanCommitAsPushed);
         Assert.True(plan.Report.CanCommitAsDrafts); // parse problems don't block drafts
-        Assert.Throws<InvalidOperationException>(() => Engine.Commit(plan, ImportMode.AsPushed));
+        Assert.Throws<InvalidOperationException>(() => Engine.Commit(plan));
     }
 
     [Fact]
@@ -118,7 +118,7 @@ public class ImportExportTests : IDisposable
         Assert.Single(plan.Report.RunErrors);
         Assert.Contains("7", plan.Report.RunErrors[0]);
         Assert.False(plan.Report.CanCommitAsPushed);
-        Assert.False(plan.Report.CanCommitAsDrafts); // the database can't hold them either way
+        Assert.True(plan.Report.CanCommitAsDrafts); // drafts open in the app, not the DB — 001s are fixed before push
     }
 
     [Fact]
@@ -149,7 +149,7 @@ public class ImportExportTests : IDisposable
     {
         WriteFile("a.mrk", Bib("10", "Física cuántica") + "\n" + Aut("3", "Moreno, Matías"));
 
-        var result = Engine.Commit(Engine.AnalyzeFolder(_dir), ImportMode.AsPushed);
+        var result = Engine.Commit(Engine.AnalyzeFolder(_dir));
 
         Assert.Equal(2, result.RecordsImported);
         Assert.Equal(1, result.BibCount);
@@ -166,16 +166,20 @@ public class ImportExportTests : IDisposable
     }
 
     [Fact]
-    public void AsDrafts_commit_marks_drafts_which_stay_out_of_search()
+    public void ParsedRecords_returns_the_records_without_touching_the_database()
     {
-        WriteFile("a.mrk", Bib("10", "Física cuántica"));
+        // Import-as-drafts opens the records in the app as unsaved working drafts; it
+        // writes NOTHING to the catalogue (they are cleaned up, then Ctrl+D/Ctrl+L).
+        WriteFile("a.mrk", Bib("10", "Física cuántica") + "\n" + Aut("3", "Moreno, Matías"));
+        var plan = Engine.AnalyzeFolder(_dir);
 
-        Engine.Commit(Engine.AnalyzeFolder(_dir), ImportMode.AsDrafts);
+        var records = Engine.ParsedRecords(plan);
 
-        var rec = Repo.List("BIB").Single();
-        Assert.Equal(RecordStatus.Draft, rec.Status);
-        Assert.Equal("10", rec.ControlNumber); // drafts keep their 001 too
-        Assert.Empty(Repo.Search("BIB", "fisica"));
+        Assert.Equal(2, records.Count);
+        Assert.Contains(records, r => r.Base == "BIB" && r.Record.ControlNumber == "10");
+        Assert.Contains(records, r => r.Base == "AUT" && r.Record.ControlNumber == "3");
+        Assert.Empty(Repo.List("BIB")); // nothing was committed
+        Assert.Empty(Repo.List("AUT"));
     }
 
     [Fact]
@@ -190,7 +194,7 @@ public class ImportExportTests : IDisposable
         Repo.Insert(squatter);
 
         Assert.ThrowsAny<Microsoft.Data.Sqlite.SqliteException>(
-            () => Engine.Commit(plan, ImportMode.AsPushed));
+            () => Engine.Commit(plan));
 
         // All-or-nothing: only the squatter remains, nothing half-imported.
         Assert.Single(Repo.List("BIB"));
@@ -204,7 +208,7 @@ public class ImportExportTests : IDisposable
     {
         string source = Bib("1", "Física nuclear: introducción") + "\n" + Bib("2", "El {dollar} y la economía");
         WriteFile("a.mrk", source);
-        Engine.Commit(Engine.AnalyzeFolder(_dir), ImportMode.AsPushed);
+        Engine.Commit(Engine.AnalyzeFolder(_dir));
 
         byte[] exported = new ExportEngine(Repo).ExportBase("BIB");
 
@@ -215,7 +219,7 @@ public class ImportExportTests : IDisposable
     public void Export_by_id_selection_respects_the_given_order()
     {
         WriteFile("a.mrk", Bib("1", "Uno") + "\n" + Bib("2", "Dos"));
-        Engine.Commit(Engine.AnalyzeFolder(_dir), ImportMode.AsPushed);
+        Engine.Commit(Engine.AnalyzeFolder(_dir));
         var list = Repo.List("BIB");
 
         byte[] bytes = new ExportEngine(Repo).Export(new[] { list[1].Id, list[0].Id });

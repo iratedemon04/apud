@@ -2472,13 +2472,22 @@ public sealed class MainForm : Form
         using var wizard = new ImportWizardForm(source, report);
         if (wizard.ShowDialog(this) != DialogResult.OK) return; // nothing committed
 
+        // Import-as-drafts: bring dirty LC records in as UNSAVED working drafts to
+        // clean up, not into the catalogue (user, 2026-08-08). They live only in the
+        // session — Ctrl+D saves one as a draft file, Ctrl+L pushes it, and any left
+        // unsaved are discarded on close (correct behaviour).
+        if (wizard.SelectedMode == ImportMode.AsDrafts)
+        {
+            OpenImportedDrafts(new ImportEngine(_repo!).ParsedRecords(plan));
+            return;
+        }
+
         try
         {
-            var result = new ImportEngine(_repo!).Commit(plan, wizard.SelectedMode);
+            var result = new ImportEngine(_repo!).Commit(plan);
             SetMessage($"Imported {result.RecordsImported} record(s) — BIB {result.BibCount}, AUT {result.AutCount}.");
-            // A single record opens straight into the editor — no hunting for it
-            // in search afterwards (task 1). This works for a draft too (it would
-            // otherwise be out of search), since we open it by id.
+            // A single pushed record opens straight into the editor — no hunting for
+            // it in search afterwards (task 1).
             if (result.ImportedIds.Count == 1)
                 OpenRecordById(result.ImportedIds[0]);
         }
@@ -2489,6 +2498,24 @@ public sealed class MainForm : Form
             MessageBox.Show(this, $"Import failed and nothing was committed.\n\n{e.Message}",
                 "Import", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
+    }
+
+    /// <summary>Import-as-drafts: open each parsed record as an UNSAVED working draft
+    /// in the sidebar. Added quietly (via <see cref="MakeSidebarItem"/>); the first is
+    /// selected so the cataloguer can start cleaning it up at once. Nothing is written —
+    /// each is dirty until Ctrl+D (save to a draft file) or Ctrl+L (push).</summary>
+    private void OpenImportedDrafts(IReadOnlyList<(string Base, MarcRecord Record)> records)
+    {
+        ListViewItem? first = null;
+        foreach (var (@base, record) in records)
+        {
+            var item = MakeSidebarItem(new EditorDocument(new StoredRecord(@base, record), dirty: true));
+            _openList.Items.Add(item);
+            first ??= item;
+        }
+        if (first is not null) { _openList.SelectedItems.Clear(); first.Selected = true; } // → record view
+        SetMessage($"Imported {records.Count} record(s) as drafts to review — Ctrl+D to keep each, " +
+                   "Ctrl+L to push. Unsaved drafts are discarded on close.");
     }
 
     // ---------- export ----------
