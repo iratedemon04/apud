@@ -175,11 +175,11 @@ public sealed class MainForm : Form
         // closes the selected record(s), Ctrl+C closes them all; either warns first
         // if anything is unsaved, and Enter confirms (tasks #5, #6). Both Global so
         // they work from the editor or the search screen.
-        _commands.Add(new Command { Id = "record.close", Name = "&Close Record", DefaultKey = "Ctrl+Delete", Execute = RemoveSelectedOpenRecords });
-        _commands.Add(new Command { Id = "record.close-all", Name = "Close &All Records", DefaultKey = "Ctrl+C", Execute = RemoveAllOpenRecords });
-        // Catalogue-delete is destructive and rarer, so it is menu-only now that
-        // Ctrl+Delete closes records (task #6); it keeps its own confirmation dialog.
-        _commands.Add(new Command { Id = "record.delete", Name = "&Delete Record/Draft...", Context = CommandContext.Editor, Execute = DeleteRecord });
+        _commands.Add(new Command { Id = "record.close", Name = "&Close Record", DefaultKey = "Ctrl+C", Execute = RemoveSelectedOpenRecords });
+        _commands.Add(new Command { Id = "record.close-all", Name = "Close &All Records", DefaultKey = "Ctrl+Alt+C", Execute = RemoveAllOpenRecords });
+        // Catalogue-delete is destructive, so it always confirms; on Ctrl+Delete now
+        // (user, 2026-08-08 — close moved to Ctrl+C / Ctrl+Alt+C).
+        _commands.Add(new Command { Id = "record.delete", Name = "&Delete Record/Draft...", Context = CommandContext.Editor, DefaultKey = "Ctrl+Delete", Execute = DeleteRecord });
 
         _keymap = Keymap.LoadFile(_commands, Path.Combine(AppContext.BaseDirectory, Keymap.FileName));
 
@@ -268,8 +268,8 @@ public sealed class MainForm : Form
         _openList.Columns.Add("Title", 130);
         _openList.Columns.Add("Status", 50);
         _openList.SelectedIndexChanged += (_, _) => ShowSelectedOpenRecord();
-        // Closing is on Ctrl+Delete (record.close) / Ctrl+C (record.close-all) now —
-        // bare Delete no longer closes a record out from under the cataloguer (task #6).
+        // Closing is on Ctrl+C (record.close) / Ctrl+Alt+C (record.close-all);
+        // Ctrl+Delete deletes (record.delete). Bare Delete does nothing here.
         var openMenu = new ContextMenuStrip();
         openMenu.Items.Add("Close", null, (_, _) => RemoveSelectedOpenRecords());
         openMenu.Items.Add("Close All", null, (_, _) => RemoveAllOpenRecords());
@@ -2181,10 +2181,16 @@ public sealed class MainForm : Form
         if (_currentDoc is null) { SetMessage("No record on screen."); return; }
         var doc = _currentDoc;
 
-        // A saved draft is a working file, not catalogue data — discard it (delete
-        // its file) with no warning; it simply will not reload next time.
+        // A saved draft is a working file, not catalogue data — but Ctrl+Delete is a
+        // fast key, so confirm before discarding its file (this cannot be undone).
         if (doc.DraftId is not null)
         {
+            if (MessageBox.Show(this,
+                    $"Discard draft \"{TitleOf(doc.Record)}\"?\n\n" +
+                    "This deletes its saved draft file. This cannot be undone.",
+                    "Delete Draft", MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+                    MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                return;
             _drafts?.Delete(doc.DraftId);
             doc.DraftId = null;
             CloseOpenRecord(doc);

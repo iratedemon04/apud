@@ -13,10 +13,11 @@
 //   catalogue.new, catalogue.import,
 //   catalogue.marc-out, catalogue.marc-out-aut, catalogue.export-base,
 //   catalogue.export-selected, base.bib, base.aut, help.about,
-//   sync.configure, sync.restore, record.delete
+//   sync.configure, sync.restore
 {
-  "record.close": "Ctrl+Delete",
-  "record.close-all": "Ctrl+C",
+  "record.close": "Ctrl+C",
+  "record.close-all": "Ctrl+Alt+C",
+  "record.delete": "Ctrl+Delete",
   "sync.upload": "Ctrl+U",
   "catalogue.open": "Ctrl+O",
   "search.focus": "F2",
