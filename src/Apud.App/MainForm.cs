@@ -111,7 +111,7 @@ public sealed class MainForm : Form
     private EditorDocument? _currentDoc; // the record showing in the editor
     private MarcField? _fieldClipboard;      // Ctrl+T copy field / Alt+T paste
     private MarcSubfield? _subfieldClipboard; // Ctrl+S copy subfield / Alt+S paste
-    private int _pushesSinceSync;            // records pushed since the last server backup
+    private readonly SyncCoordinator _sync;  // server backup/restore + the pushes-since-sync counter
 
     private string CurrentBase => _currentBase;
 
@@ -126,6 +126,22 @@ public sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(950, 620);
 
+        // Server backup/restore lives in its own collaborator (docs/MAINFORM-REFACTOR-PLAN.md
+        // step 1). It gets only what it needs — never `this` — via lazy getters and callbacks;
+        // the lambdas are deferred, so fields still null here (e.g. _messageBar) are fine.
+        _sync = new SyncCoordinator(
+            owner: this,
+            requireCatalogue: RequireCatalogue,
+            repo: () => _repo,
+            db: () => _db,
+            catalogPath: () => _catalogPath,
+            promptText: PromptForText,
+            setMessage: SetMessage,
+            refreshStatus: () => _messageBar?.Refresh(), // assigned later in this ctor; the lambda only runs post-construction
+            startFolder: StartFolder,
+            rememberFolder: RememberFolder,
+            openCatalogue: path => OpenCatalog(path));
+
         // ----- command table (Module 6 step 1) -----
         // Menus render from this table and keymap.json binds against it.
         // Catalogue commands are menu-only (§6.2: record commands own the keyboard).
@@ -135,9 +151,9 @@ public sealed class MainForm : Form
         _commands.Add(new Command { Id = "catalogue.marc-out", Name = "Set &BIB Output Folder...", Execute = () => SetMarcOutFolder("BIB") });
         _commands.Add(new Command { Id = "catalogue.marc-out-aut", Name = "Set &Authority Output Folder...", Execute = () => SetMarcOutFolder("AUT") });
         _commands.Add(new Command { Id = "catalogue.org-code", Name = "Set &Organization Code...", Execute = SetOrgCode });
-        _commands.Add(new Command { Id = "sync.configure", Name = "&Set Server...", Execute = ConfigureSync });
-        _commands.Add(new Command { Id = "sync.upload", Name = "&Back Up to Server", DefaultKey = "Ctrl+U", Execute = UploadToServer });
-        _commands.Add(new Command { Id = "sync.restore", Name = "&Restore from Server...", Execute = RestoreFromServer });
+        _commands.Add(new Command { Id = "sync.configure", Name = "&Set Server...", Execute = _sync.Configure });
+        _commands.Add(new Command { Id = "sync.upload", Name = "&Back Up to Server", DefaultKey = "Ctrl+U", Execute = _sync.Upload });
+        _commands.Add(new Command { Id = "sync.restore", Name = "&Restore from Server...", Execute = _sync.Restore });
         _commands.Add(new Command { Id = "catalogue.export-base", Name = "Export &Base...", Execute = ExportBase });
         _commands.Add(new Command { Id = "catalogue.export-selected", Name = "Export &Selected...", Execute = ExportSelected });
         _commands.Add(new Command { Id = "app.exit", Name = "E&xit", DefaultKey = "Alt+F4", Execute = Close });
@@ -563,15 +579,9 @@ public sealed class MainForm : Form
             return;
         }
 
-        if (_repo is null || _pushesSinceSync == 0) return;
-        var settings = SyncSettings.Load(_repo);
-        if (!settings.IsConfigured) return;
-
-        var answer = MessageBox.Show(this,
-            $"{_pushesSinceSync} record(s) were pushed since the last backup.\n\nBack up to the server before closing?",
-            "Apud", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
-        if (answer == DialogResult.Cancel) { e.Cancel = true; return; }
-        if (answer == DialogResult.Yes) UploadToServer();
+        // The "back up first?" prompt (and its push counter) belongs to the sync
+        // collaborator; it returns false only when the user chose Cancel.
+        if (!_sync.OfferBackupBeforeClose()) e.Cancel = true;
     }
 
     /// <summary>Menu item for a command: text, handler and shortcut display all
@@ -636,25 +646,12 @@ public sealed class MainForm : Form
 
     /// <summary>Help → Backup Time: the first-backup notice + estimate table, viewable
     /// any time. Also shown once before a catalogue's first backup by the gate in
-    /// <see cref="UploadToServer"/>.</summary>
+    /// <see cref="SyncCoordinator"/>.</summary>
     private void ShowBackupTime()
     {
         using var form = new BackupTimeForm(preBackup: false);
         form.ShowDialog(this);
     }
-
-    /// <summary>Before a catalogue's very first backup, show the time warning once (any
-    /// size). Returns false if the user cancelled at the warning. The "seen" flag is a
-    /// per-catalogue setting, set only after the first backup actually succeeds — so a
-    /// cancelled or failed first attempt still warns next time.</summary>
-    private bool ConfirmFirstBackup()
-    {
-        if (_repo?.GetSetting(FirstBackupSeenKey) == "1") return true;
-        using var form = new BackupTimeForm(preBackup: true);
-        return form.ShowDialog(this) == DialogResult.OK;
-    }
-
-    private const string FirstBackupSeenKey = "sync.first_backup_seen";
 
     private void ShowAbout()
     {
@@ -1772,7 +1769,7 @@ public sealed class MainForm : Form
         // The record is now in the catalogue — its draft file (if it had one) has
         // done its job and would otherwise reopen as a duplicate. Remove it.
         if (doc.DraftId is not null) { _drafts?.Delete(doc.DraftId); doc.DraftId = null; }
-        _pushesSinceSync++; // for the on-exit "back up first?" prompt
+        _sync.NotePush(); // for the on-exit "back up first?" prompt
         RenderRecord();
         UpdateSidebarItem(doc);
         UpdateHeader();
@@ -1985,226 +1982,6 @@ public sealed class MainForm : Form
 
         _repo.SetSetting(key, dialog.SelectedPath);
         SetMessage("Output folder set.");
-    }
-
-    // ---------- server backup / publish (Module 11, docs/PLAN.md §9b) ----------
-
-    /// <summary>File → Backup Server → Set Server: the per-catalogue backup target.</summary>
-    private void ConfigureSync()
-    {
-        if (!RequireCatalogue()) return;
-
-        using var form = new SyncSettingsForm(SyncSettings.Load(_repo));
-        if (form.ShowDialog(this) != DialogResult.OK) return;
-
-        form.Result.Save(_repo);
-        SetMessage(form.Result.IsConfigured
-            ? $"Server set: {form.Result.User}@{form.Result.Host}:{form.Result.Port} → {form.Result.RemoteRoot}."
-            : "Server settings saved — host, user and private key are still needed before a backup.");
-    }
-
-    /// <summary>Builds a SyncService whose transport connects with the session
-    /// passphrase. A fresh transport per operation (the factory runs each call).</summary>
-    private SyncService SyncServiceFor(SyncSettings settings, string? passphrase) =>
-        new(() =>
-        {
-            var transport = new SshNetSftpTransport(settings, passphrase);
-            transport.Connect();
-            return transport;
-        }, CatalogueName());
-
-    /// <summary>The open catalogue's file name (no extension) — the identity a backup keeps.</summary>
-    private string CatalogueName() =>
-        _catalogPath is null ? "catalog" : Path.GetFileNameWithoutExtension(_catalogPath);
-
-    /// <summary>Asks for the key passphrase (masked, blank allowed). Null = cancelled.</summary>
-    private string? AskPassphrase(SyncSettings settings) =>
-        PromptForText("Private Key Passphrase",
-            $"Passphrase for {Path.GetFileName(settings.KeyPath)} — leave blank if the key has none.",
-            "", mask: true);
-
-    /// <summary>File → Backup Server → Back Up to Server: VACUUM-INTO snapshot + latest/ refresh,
-    /// uploaded atomically, then old snapshots pruned to the keep-N.</summary>
-    private void UploadToServer()
-    {
-        if (!RequireCatalogue() || _db is null) return;
-
-        var settings = SyncSettings.Load(_repo);
-        if (!settings.IsConfigured)
-        {
-            SetMessage("Configure the server first — File → Backup Server → Set Server.");
-            return;
-        }
-
-        if (!ConfirmFirstBackup()) return; // first backup: warn about time, once, before anything
-        if (AskPassphrase(settings) is not string passphrase) return; // cancelled
-
-        SetMessage($"Backing up to {settings.Host}…");
-        _messageBar.Refresh();
-        Cursor.Current = Cursors.WaitCursor;
-        try
-        {
-            var service = SyncServiceFor(settings, passphrase);
-            var source = new DbSnapshotSource(_db, _repo, settings.UploadExport);
-            var result = service.Upload(source, settings, DateTime.UtcNow);
-
-            // Trust-on-first-use: pin the fingerprint the first time we see it.
-            if (settings.HostFingerprint is null && result.SeenFingerprint is not null)
-            {
-                settings.HostFingerprint = result.SeenFingerprint;
-                settings.Save(_repo);
-            }
-
-            _pushesSinceSync = 0;
-            _repo.SetSetting(FirstBackupSeenKey, "1"); // first backup done → no more time warning
-            string records = result.RecordFiles > 0 ? $" + {result.RecordFiles} record file(s)" : "";
-            string pruned = result.Pruned > 0 ? $" Pruned {result.Pruned} old snapshot(s)." : "";
-            SetMessage($"Backed up {Path.GetFileName(result.RemoteSnapshot)}{records} → {settings.RemoteRoot}.{pruned}");
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, ex.Message, "Backup failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            SetMessage("Backup failed.");
-        }
-        finally { Cursor.Current = Cursors.Default; }
-    }
-
-    /// <summary>File → Backup Server → Restore from Server: pick a server snapshot, download it
-    /// to a local file, and (optionally) open that copy side-by-side. The working
-    /// catalogue is never overwritten — restoring is opening a downloaded copy, a
-    /// conscious act, not an automatic replace.</summary>
-    private void RestoreFromServer()
-    {
-        if (!RequireCatalogue()) return;
-
-        var settings = SyncSettings.Load(_repo);
-        if (!settings.IsConfigured)
-        {
-            SetMessage("Configure the server first — File → Backup Server → Set Server.");
-            return;
-        }
-
-        if (AskPassphrase(settings) is not string passphrase) return;
-
-        IReadOnlyList<SnapshotInfo> snapshots;
-        Cursor.Current = Cursors.WaitCursor;
-        try
-        {
-            snapshots = SyncServiceFor(settings, passphrase).ListSnapshots(settings);
-        }
-        catch (Exception ex)
-        {
-            Cursor.Current = Cursors.Default;
-            MessageBox.Show(this, ex.Message, "Restore", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            return;
-        }
-        finally { Cursor.Current = Cursors.Default; }
-
-        if (snapshots.Count == 0) { SetMessage("No snapshots on the server yet."); return; }
-
-        if (PickSnapshot(snapshots) is not string chosen) return;
-
-        using var save = new SaveFileDialog
-        {
-            Title = "Save downloaded snapshot as",
-            InitialDirectory = StartFolder(),
-            FileName = chosen,
-            Filter = "Apud catalogue (*.db)|*.db",
-            OverwritePrompt = true,
-        };
-        if (save.ShowDialog(this) != DialogResult.OK) return;
-        RememberFolder(Path.GetDirectoryName(save.FileName));
-
-        Cursor.Current = Cursors.WaitCursor;
-        try
-        {
-            SyncServiceFor(settings, passphrase).Download(settings, chosen, save.FileName);
-        }
-        catch (Exception ex)
-        {
-            Cursor.Current = Cursors.Default;
-            MessageBox.Show(this, ex.Message, "Restore", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            return;
-        }
-        finally { Cursor.Current = Cursors.Default; }
-
-        // Same logic as the snapshot download, applied to the physical .mrk records: an
-        // optional pull of the whole bib/ + aut/ tree into a folder the user picks.
-        int? records = OfferRecordFolderDownload(settings, passphrase);
-        string recNote = records is int n
-            ? (n > 0 ? $" {n} record file(s) downloaded." : " No record files on the server.")
-            : "";
-
-        if (MessageBox.Show(this,
-                $"Downloaded to {Path.GetFileName(save.FileName)}.\n\nOpen it now as a separate catalogue?",
-                "Restore", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
-            OpenCatalog(save.FileName);
-        else
-            SetMessage($"Snapshot saved to {Path.GetFileName(save.FileName)}.{recNote}");
-    }
-
-    /// <summary>Offers to also download the published per-record .mrk folders (bib/ + aut/)
-    /// into a folder the user chooses. Returns the number of files downloaded, or null if
-    /// the user declined the offer, cancelled the folder pick, or it failed.</summary>
-    private int? OfferRecordFolderDownload(SyncSettings settings, string? passphrase)
-    {
-        if (MessageBox.Show(this,
-                "Also download the record files (.mrk)?\n\nThey arrive as bib/ and aut/ sub-folders in a folder you choose; files of the same name are replaced.",
-                "Restore records", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
-            return null;
-
-        using var pick = new FolderBrowserDialog
-        {
-            Description = "Choose a folder for the record files (bib/ and aut/ go inside it)",
-            UseDescriptionForTitle = true,
-            SelectedPath = StartFolder(),
-        };
-        if (pick.ShowDialog(this) != DialogResult.OK) return null;
-        RememberFolder(pick.SelectedPath);
-
-        Cursor.Current = Cursors.WaitCursor;
-        try
-        {
-            return SyncServiceFor(settings, passphrase)
-                .DownloadRecordFolders(settings, pick.SelectedPath).Files;
-        }
-        catch (Exception ex)
-        {
-            Cursor.Current = Cursors.Default;
-            MessageBox.Show(this, ex.Message, "Restore records", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            return null;
-        }
-        finally { Cursor.Current = Cursors.Default; }
-    }
-
-    /// <summary>A plain list picker for the server snapshots (newest first).</summary>
-    private string? PickSnapshot(IReadOnlyList<SnapshotInfo> snapshots)
-    {
-        using var dialog = new Form
-        {
-            Text = "Restore from Server",
-            FormBorderStyle = FormBorderStyle.FixedDialog,
-            StartPosition = FormStartPosition.CenterParent,
-            MinimizeBox = false,
-            MaximizeBox = false,
-            ClientSize = new Size(420, 320),
-        };
-        var list = new ListBox { Location = new Point(14, 14), Size = new Size(392, 250), Font = new Font("Consolas", 9f) };
-        foreach (var s in snapshots)
-            list.Items.Add($"{s.Name}   ({s.TimestampUtc.ToLocalTime():yyyy-MM-dd HH:mm:ss})");
-        list.SelectedIndex = 0;
-        var ok = new Button { Text = "Download", DialogResult = DialogResult.OK, Size = new Size(100, 28), Location = new Point(202, 276) };
-        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Size = new Size(90, 28), Location = new Point(316, 276) };
-        list.DoubleClick += (_, _) => { if (list.SelectedIndex >= 0) { dialog.DialogResult = DialogResult.OK; dialog.Close(); } };
-        dialog.Controls.Add(list);
-        dialog.Controls.Add(ok);
-        dialog.Controls.Add(cancel);
-        dialog.AcceptButton = ok;
-        dialog.CancelButton = cancel;
-
-        return dialog.ShowDialog(this) == DialogResult.OK && list.SelectedIndex >= 0
-            ? snapshots[list.SelectedIndex].Name
-            : null;
     }
 
     /// <summary>Deletes the displayed record from the catalogue AND its
