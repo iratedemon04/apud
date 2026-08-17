@@ -19,6 +19,7 @@ public sealed class ImportWizardForm : Form
     private readonly RadioButton _asPushed;
     private readonly RadioButton _asDrafts;
     private readonly CheckBox _normalize;
+    private readonly CheckBox _normalizeEncoding;
     private readonly Button _import;
 
     public ImportMode SelectedMode { get; private set; } = ImportMode.AsDrafts;
@@ -27,7 +28,10 @@ public sealed class ImportWizardForm : Form
     /// caller applies it and persists it back to <see cref="AppState"/>.</summary>
     public bool NormalizeFixedFields { get; private set; }
 
-    public ImportWizardForm(string folder, ImportReport report, bool normalizeFixedFields)
+    /// <summary>Whether the cataloguer left "normalize LDR encoding to Unicode" ticked.</summary>
+    public bool NormalizeEncoding { get; private set; }
+
+    public ImportWizardForm(string folder, ImportReport report, bool normalizeFixedFields, bool normalizeEncoding)
     {
         _report = report;
 
@@ -134,6 +138,14 @@ public sealed class ImportWizardForm : Form
             Height = 22,
             Checked = normalizeFixedFields,
         };
+        _normalizeEncoding = new CheckBox
+        {
+            Text = "Normalize LDR encoding — set the character coding scheme (LDR/09) to 'a' (Unicode) so the leader matches the UTF-8 data. Applies to both modes; setting is remembered.",
+            AutoSize = false,
+            Dock = DockStyle.Top,
+            Height = 22,
+            Checked = normalizeEncoding,
+        };
 
         _import = new Button { Text = "&Import", DialogResult = DialogResult.OK, Width = 90 };
         var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Width = 90 };
@@ -141,6 +153,7 @@ public sealed class ImportWizardForm : Form
         {
             SelectedMode = _asPushed.Checked ? ImportMode.AsPushed : ImportMode.AsDrafts;
             NormalizeFixedFields = _normalize.Checked;
+            NormalizeEncoding = _normalizeEncoding.Checked;
         };
 
         var buttons = new FlowLayoutPanel
@@ -153,9 +166,10 @@ public sealed class ImportWizardForm : Form
         buttons.Controls.Add(cancel);
         buttons.Controls.Add(_import);
 
-        // Docked top, so the last control added sits highest: pushed, drafts, then the
-        // normalize checkbox underneath both radios.
-        var footer = new Panel { Dock = DockStyle.Bottom, Height = 112, Padding = new Padding(8, 4, 8, 0) };
+        // Docked top, so the last control added sits highest: pushed, drafts, then the two
+        // normalize checkboxes underneath both radios (fill-fields above encoding).
+        var footer = new Panel { Dock = DockStyle.Bottom, Height = 136, Padding = new Padding(8, 4, 8, 0) };
+        footer.Controls.Add(_normalizeEncoding);
         footer.Controls.Add(_normalize);
         footer.Controls.Add(_asDrafts);
         footer.Controls.Add(_asPushed);

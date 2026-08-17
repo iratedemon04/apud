@@ -94,4 +94,36 @@ public class FixedFieldNormalizerTests
 
         Assert.Equal(0, FixedFieldNormalizer.Normalize(rec));
     }
+
+    // ----- encoding normalization (LDR/09 -> 'a') -----
+
+    [Fact]
+    public void Blank_ldr09_becomes_unicode_a()
+    {
+        var rec = new MarcRecord { Leader = "00849nz   2200253n  4500" }; // LDR/09 blank (MARC-8)
+
+        int changed = FixedFieldNormalizer.NormalizeEncoding(rec);
+
+        Assert.Equal('a', rec.Leader[9]);
+        Assert.Equal("00849nz  a2200253n  4500", rec.Leader);
+        Assert.Equal(24, rec.Leader.Length);
+        Assert.Equal(1, changed);
+    }
+
+    [Fact]
+    public void Already_unicode_ldr09_is_left_alone()
+    {
+        var rec = new MarcRecord { Leader = "00766nam a22002534i 4500" }; // LDR/09 already 'a'
+        Assert.Equal(0, FixedFieldNormalizer.NormalizeEncoding(rec));
+    }
+
+    [Fact]
+    public void Encoding_normalization_touches_only_position_09()
+    {
+        var rec = new MarcRecord { Leader = "00849nz   2200253n  4500" };
+        FixedFieldNormalizer.NormalizeEncoding(rec);
+        // Every position except 09 is unchanged; 20-23 stays "4500", 10-11 stays "22".
+        Assert.Equal("00849nz  ", rec.Leader[..9]);
+        Assert.Equal("2200253n  4500", rec.Leader[10..]);
+    }
 }

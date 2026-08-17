@@ -49,6 +49,22 @@ public static class FixedFieldNormalizer
         return changed;
     }
 
+    /// <summary>Character coding scheme, leader position 09: 'a' = UCS/Unicode.</summary>
+    public const char UnicodeCoding = 'a';
+
+    /// <summary>Forces the leader's character-coding-scheme byte (LDR/09) to 'a' (Unicode).
+    /// Apud stores and exports everything as UTF-8, so a blank there (MARC-8) or any other
+    /// value is a lie that makes a downstream binary-MARC converter mojibake the accents.
+    /// Mutates the record in place; returns 1 if it changed the byte, else 0. A leader that
+    /// is not the required 24 characters is left untouched (the reader/validator owns that).</summary>
+    public static int NormalizeEncoding(MarcRecord record)
+    {
+        string ldr = record.Leader;
+        if (ldr.Length != 24 || ldr[9] == UnicodeCoding) return 0;
+        record.Leader = ldr[..9] + UnicodeCoding + ldr[10..];
+        return 1;
+    }
+
     /// <summary>Returns the same string reference when nothing changed (so callers can
     /// skip the write), otherwise a copy with placeholders turned into spaces.</summary>
     private static string NormalizeText(string s, ref int changed)

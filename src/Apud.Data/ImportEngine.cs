@@ -190,6 +190,18 @@ public sealed class ImportEngine
         return changed;
     }
 
+    /// <summary>Forces LDR/09 (character coding scheme) to 'a' (Unicode) on every record in
+    /// the plan, so the leader tells the truth about the UTF-8 data Apud stores. Mutates the
+    /// plan's records in place; feeds both commit paths. Independent of <see cref="Normalize"/>
+    /// — a caller applies either, both, or neither. Returns the count of records changed.</summary>
+    public static int NormalizeEncoding(ImportPlan plan)
+    {
+        int changed = 0;
+        foreach (var p in plan.Records)
+            changed += FixedFieldNormalizer.NormalizeEncoding(p.Record);
+        return changed;
+    }
+
     /// <summary>The parsed records of a run, to open as unsaved working DRAFTS in the
     /// sidebar — the import-as-drafts path (dirty LC records to clean up before push).
     /// Nothing is written: a draft lives only in the session until Ctrl+D saves it to a

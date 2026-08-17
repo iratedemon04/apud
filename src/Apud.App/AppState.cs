@@ -44,6 +44,13 @@ public sealed class AppState
     /// wrong once the record becomes binary MARC (user, 2026-08-17).</summary>
     public bool NormalizeFixedFieldsOnImport { get; set; } = true;
 
+    /// <summary>Whether Import forces LDR/09 (character coding scheme) to 'a' (Unicode) so
+    /// the leader matches the UTF-8 data Apud stores. Switchable in the Import dialog,
+    /// independent of <see cref="NormalizeFixedFieldsOnImport"/>, and persisted. Defaults
+    /// to on — a blank/MARC-8 flag on UTF-8 data mojibakes accents downstream (user,
+    /// 2026-08-17).</summary>
+    public bool NormalizeEncodingOnImport { get; set; } = true;
+
     public static AppState Load() => LoadFrom(DefaultPath);
     public void Save() => SaveTo(DefaultPath);
 
