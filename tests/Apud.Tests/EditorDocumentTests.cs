@@ -496,8 +496,9 @@ public class EditorDocumentTests
     // ---------- the templates we ship ----------
 
     [Theory]
-    [InlineData("monograph.mrk", RecordKind.Bibliographic)]
-    [InlineData("serial.mrk", RecordKind.Bibliographic)]
+    [InlineData("spa-m.mrk", RecordKind.Bibliographic)]
+    [InlineData("spa-s.mrk", RecordKind.Bibliographic)]
+    [InlineData("spa-a.mrk", RecordKind.Bibliographic)]
     [InlineData("authority.mrk", RecordKind.Authority)]
     public void Shipped_templates_parse_with_sane_skeletons(string file, RecordKind kind)
     {
