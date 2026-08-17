@@ -1,0 +1,25 @@
+=LDR  00000naa a2200000 i 4500
+=008       s        xx                  eng d
+=024  7\$a***$2doi
+=040  \\$aMX-MxBAC$bspa$erda
+=082  04$a***$b***$220
+=100  1\$a***$eautor
+=245  10$a***$b***$c***
+=250  \\$a***a edición
+=264  \1$a***$b***$c***
+=300  \\$a*** páginas$bilustraciones$c*** cm
+=336  \\$atexto$btxt$2rdacontent
+=337  \\$asin mediación$bn$2rdamedia
+=338  \\$acarpeta$bnn$2rdacarrier
+=500  \\$a***
+=505  0\$a***
+=590  \\$a***
+=650  \7$a***$2BAC
+=700  1\$a***$eautor
+=773  0\$t***$g***$x***
+=852  2\$eBúfalo
+=901  \\$aArchivo
+
+
+
+

@@ -1,0 +1,10 @@
+=LDR  00000naa a2200000 i 4500
+=008        s        xx                  und d
+=040  \\$a$b$erda
+=100  1\$a
+=245  10$a$b$c
+=336  \\$atext$btxt$2rdacontent
+=337  \\$aunmediated$bn$2rdamedia
+=338  \\$avolume$bnc$2rdacarrier
+=650  \0$a
+=773  0\$t$g$x
