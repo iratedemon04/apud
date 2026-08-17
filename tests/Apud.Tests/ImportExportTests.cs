@@ -90,6 +90,26 @@ public class ImportExportTests : IDisposable
     }
 
     [Fact]
+    public void Normalize_rewrites_fixed_field_placeholders_across_the_whole_run()
+    {
+        // An LC-style record whose leader and 008 blanks are drawn with '\'.
+        WriteFile("lc.mrk",
+            "=LDR  00766nam a22002534i\\4500\n=001  7\n" +
+            "=008  260415s2017\\\\\\\\mx\\\\\\\\\\\\\\\\\\\\\\\\000 0 spa d\n" +
+            "=245  10$aUno\n");
+        var plan = Engine.AnalyzeFolder(_dir);
+
+        int changed = ImportEngine.Normalize(plan);
+        Assert.True(changed > 0);
+
+        var rec = plan.Records.Single().Record;
+        Assert.Equal("00766nam a22002534i 4500", rec.Leader);
+        Assert.Equal("260415s2017    mx            000 0 spa d",
+            rec.FieldsWithTag("008").Single().ControlData);
+        Assert.Equal(0, ImportEngine.Normalize(plan)); // idempotent — second pass is a no-op
+    }
+
+    [Fact]
     public void Broken_file_reports_errors_with_line_numbers_and_blocks_pushed_commit()
     {
         WriteFile("clean.mrk", Bib("1", "Uno"));

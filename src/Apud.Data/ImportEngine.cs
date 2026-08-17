@@ -175,6 +175,21 @@ public sealed class ImportEngine
         return new ImportResult(bib + aut, bib, aut, ids);
     }
 
+    /// <summary>Normalizes the coded fixed fields (leader + 006/007/008) of every record
+    /// in the plan, turning blank placeholders ('\' and '^' — the way LC and other sources
+    /// draw an empty position) into real spaces. Mutates the plan's records in place, so it
+    /// applies to both commit paths (AS-PUSHED and AS-DRAFTS); call it before Commit or
+    /// ParsedRecords. 001 uniqueness is unaffected (001 is not a coded fixed field), so it
+    /// is safe to run after Analyze. Returns the number of characters changed across the run
+    /// (0 = every record was already clean).</summary>
+    public static int Normalize(ImportPlan plan)
+    {
+        int changed = 0;
+        foreach (var p in plan.Records)
+            changed += FixedFieldNormalizer.Normalize(p.Record);
+        return changed;
+    }
+
     /// <summary>The parsed records of a run, to open as unsaved working DRAFTS in the
     /// sidebar — the import-as-drafts path (dirty LC records to clean up before push).
     /// Nothing is written: a draft lives only in the session until Ctrl+D saves it to a

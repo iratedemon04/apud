@@ -18,11 +18,16 @@ public sealed class ImportWizardForm : Form
     private readonly TextBox _detail;
     private readonly RadioButton _asPushed;
     private readonly RadioButton _asDrafts;
+    private readonly CheckBox _normalize;
     private readonly Button _import;
 
     public ImportMode SelectedMode { get; private set; } = ImportMode.AsDrafts;
 
-    public ImportWizardForm(string folder, ImportReport report)
+    /// <summary>Whether the cataloguer left "normalize coded fixed fields" ticked. The
+    /// caller applies it and persists it back to <see cref="AppState"/>.</summary>
+    public bool NormalizeFixedFields { get; private set; }
+
+    public ImportWizardForm(string folder, ImportReport report, bool normalizeFixedFields)
     {
         _report = report;
 
@@ -121,10 +126,22 @@ public sealed class ImportWizardForm : Form
         _asPushed.CheckedChanged += (_, _) => UpdateImportEnabled();
         _asDrafts.CheckedChanged += (_, _) => UpdateImportEnabled();
 
+        _normalize = new CheckBox
+        {
+            Text = "Normalize coded fixed fields — rewrite blank placeholders ('\\' and '^') in the leader and 006/007/008 as real spaces. Applies to both modes; setting is remembered.",
+            AutoSize = false,
+            Dock = DockStyle.Top,
+            Height = 22,
+            Checked = normalizeFixedFields,
+        };
+
         _import = new Button { Text = "&Import", DialogResult = DialogResult.OK, Width = 90 };
         var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Width = 90 };
         _import.Click += (_, _) =>
+        {
             SelectedMode = _asPushed.Checked ? ImportMode.AsPushed : ImportMode.AsDrafts;
+            NormalizeFixedFields = _normalize.Checked;
+        };
 
         var buttons = new FlowLayoutPanel
         {
@@ -136,7 +153,10 @@ public sealed class ImportWizardForm : Form
         buttons.Controls.Add(cancel);
         buttons.Controls.Add(_import);
 
-        var footer = new Panel { Dock = DockStyle.Bottom, Height = 88, Padding = new Padding(8, 4, 8, 0) };
+        // Docked top, so the last control added sits highest: pushed, drafts, then the
+        // normalize checkbox underneath both radios.
+        var footer = new Panel { Dock = DockStyle.Bottom, Height = 112, Padding = new Padding(8, 4, 8, 0) };
+        footer.Controls.Add(_normalize);
         footer.Controls.Add(_asDrafts);
         footer.Controls.Add(_asPushed);
 

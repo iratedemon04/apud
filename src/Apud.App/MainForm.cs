@@ -1895,8 +1895,18 @@ public sealed class MainForm : Form
             return;
         }
 
-        using var wizard = new ImportWizardForm(source, report);
+        using var wizard = new ImportWizardForm(source, report, _appState.NormalizeFixedFieldsOnImport);
         if (wizard.ShowDialog(this) != DialogResult.OK) return; // nothing committed
+
+        // Remember the normalize choice and, when on, rewrite blank placeholders ('\'/'^')
+        // in the coded fixed fields before anything else touches the parsed records — this
+        // feeds both the drafts and the pushed path below.
+        if (wizard.NormalizeFixedFields != _appState.NormalizeFixedFieldsOnImport)
+        {
+            _appState.NormalizeFixedFieldsOnImport = wizard.NormalizeFixedFields;
+            _appState.Save();
+        }
+        if (wizard.NormalizeFixedFields) ImportEngine.Normalize(plan);
 
         // Import-as-drafts: bring dirty LC records in as UNSAVED working drafts to
         // clean up, not into the catalogue (user, 2026-08-08). They live only in the

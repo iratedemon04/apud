@@ -37,6 +37,13 @@ public sealed class AppState
     /// own range on apply.</summary>
     public float FontScale { get; set; } = 1f;
 
+    /// <summary>Whether Import normalizes coded fixed fields (leader + 006/007/008),
+    /// rewriting blank placeholders ('\' and '^' from LC and other exports) as real
+    /// spaces. The Import dialog reflects and updates this; it persists so the choice
+    /// stays put across runs. Defaults to on — a stray '\'/'^' in a coded position is
+    /// wrong once the record becomes binary MARC (user, 2026-08-17).</summary>
+    public bool NormalizeFixedFieldsOnImport { get; set; } = true;
+
     public static AppState Load() => LoadFrom(DefaultPath);
     public void Save() => SaveTo(DefaultPath);
 
