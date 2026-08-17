@@ -27,76 +27,12 @@ public sealed class MainForm : Form
     private readonly ListView _openList;          // sidebar: open records (any base)
     private readonly Button _searchViewButton;
     private readonly Button _recordViewButton;
-    private readonly Panel _searchView;
     private readonly Panel _recordView;
-
-    private readonly Label _searchBaseLabel; // read-only "which base" tag in the search bar (was a redundant dropdown)
-    private readonly ComboBox _searchScope;
-    private readonly ComboBox _sortBox;
-    private readonly TextBox _searchBox;
-    private readonly ListView _resultsList;
-    private readonly ListView _historyList;
-    private readonly SearchHistory _history = new();
-    private IReadOnlyList<RecordSummary> _currentResults = Array.Empty<RecordSummary>();
-    private Button _moreButton = null!;   // "Load next N" bar for a paged List All
-    private bool _listAllMode;            // true while a paged whole-base listing is shown
-    private int _listAllTotal;            // total records in the base being paged
-    private const int ListPageSize = 1000;
+    private readonly SearchController _search;  // the whole Search screen (search bar + results + history + paging + base)
 
     private readonly Label _recordHeader;
     private readonly RecordGrid _grid = new();     // textbox-grid editor (replaces the DataGridView); inited here so the command lambdas can capture it
     private readonly ListView _findings;          // Ctrl+W/Ctrl+L output, click to jump
-
-    // The scope dropdown is base-aware: BIB and AUT index completely different
-    // fields, so each base shows its own list (Aleph presents different indexes per
-    // base). _scopes holds whichever list is currently displayed.
-    private static readonly (string Label, SearchScope Scope)[] BibScopes =
-    {
-        ("All fields", SearchScope.All),
-        ("Title", SearchScope.Title),
-        ("Author", SearchScope.Author),
-        ("Subjects", SearchScope.Subjects),
-        ("Series", SearchScope.Series),
-        ("Publisher", SearchScope.Publisher),
-        ("Notes", SearchScope.Notes),
-        ("Call No.", SearchScope.CallNumber),
-        ("ISBN/ISSN", SearchScope.Isbn),
-        ("Local (9XX)", SearchScope.Local9xx),
-        ("Control No.", SearchScope.ControlNumber),
-    };
-
-    private static readonly (string Label, SearchScope Scope)[] AutScopes =
-    {
-        ("All fields", SearchScope.All),
-        ("Personal name", SearchScope.HeadingPersonal),
-        ("Corporate name", SearchScope.HeadingCorporate),
-        ("Meeting name", SearchScope.HeadingMeeting),
-        ("Uniform title", SearchScope.HeadingUniform),
-        ("Topical term", SearchScope.HeadingTopical),
-        ("Geographic name", SearchScope.HeadingGeographic),
-        ("Genre/form", SearchScope.HeadingGenre),
-        ("See-from / Variants", SearchScope.SeeFrom),
-        ("See-also / Related", SearchScope.SeeAlso),
-        ("Sources", SearchScope.Sources),
-        ("Control No.", SearchScope.ControlNumber),
-    };
-
-    private (string Label, SearchScope Scope)[] _scopes = BibScopes;
-    private string _scopesBase = "";
-
-    /// <summary>How the result set is ordered. Relevance keeps the FTS rank order
-    /// (a keyword search's best-match-first); the rest are deterministic sorts the
-    /// cataloguer chooses, ILS-style. Default is Control No. — predictable, always
-    /// defined, and the same order as List All.</summary>
-    private enum ResultSort { ControlNumber, Title, Author, Relevance }
-
-    private static readonly (string Label, ResultSort Sort)[] Sorts =
-    {
-        ("Sort: Control No.", ResultSort.ControlNumber),
-        ("Sort: Title", ResultSort.Title),
-        ("Sort: Author", ResultSort.Author),
-        ("Sort: Relevance", ResultSort.Relevance),
-    };
 
     private readonly CommandRegistry _commands = new();
     private readonly Keymap _keymap;
@@ -107,13 +43,10 @@ public sealed class MainForm : Form
     private RecordRepository? _repo;
     private DraftStore? _drafts;            // per-catalogue draft .mrk files (not in the DB)
     private string? _catalogPath;          // the open .db path; MARC_OUT sits beside it
-    private string _currentBase = "BIB"; // the single source of truth for the active base (menu + Ctrl+B drive it)
     private EditorDocument? _currentDoc; // the record showing in the editor
     private MarcField? _fieldClipboard;      // Ctrl+T copy field / Alt+T paste
     private MarcSubfield? _subfieldClipboard; // Ctrl+S copy subfield / Alt+S paste
     private readonly SyncCoordinator _sync;  // server backup/restore + the pushes-since-sync counter
-
-    private string CurrentBase => _currentBase;
 
     private CommandContext ActiveContext =>
         _recordView.Visible ? CommandContext.Editor : CommandContext.Search;
@@ -142,6 +75,18 @@ public sealed class MainForm : Form
             rememberFolder: RememberFolder,
             openCatalogue: path => OpenCatalog(path));
 
+        // The Search screen is its own collaborator too (docs/MAINFORM-REFACTOR-PLAN.md
+        // step 2). Built early, before the command table binds to it — like _sync it
+        // never gets `this`, only a repo getter, the catalogue guard, the message sink,
+        // the "open this record id" bridge to the editor, and a callback to keep the
+        // Base menu's checkmarks in step (deferred, so _bibItem/_autItem are fine null here).
+        _search = new SearchController(
+            repo: () => _repo,
+            requireCatalogue: RequireCatalogue,
+            setMessage: SetMessage,
+            openRecordById: OpenRecordById,
+            onBaseChanged: UpdateBaseChecks);
+
         // ----- command table (Module 6 step 1) -----
         // Menus render from this table and keymap.json binds against it.
         // Catalogue commands are menu-only (§6.2: record commands own the keyboard).
@@ -157,9 +102,9 @@ public sealed class MainForm : Form
         _commands.Add(new Command { Id = "catalogue.export-base", Name = "Export &Base...", Execute = ExportBase });
         _commands.Add(new Command { Id = "catalogue.export-selected", Name = "Export &Selected...", Execute = ExportSelected });
         _commands.Add(new Command { Id = "app.exit", Name = "E&xit", DefaultKey = "Alt+F4", Execute = Close });
-        _commands.Add(new Command { Id = "base.bib", Name = "&BIB — Bibliographic", Execute = () => SetBase("BIB") });
-        _commands.Add(new Command { Id = "base.aut", Name = "&AUT — Authority", Execute = () => SetBase("AUT") });
-        _commands.Add(new Command { Id = "base.toggle", Name = "&Switch Base (BIB ⇄ AUT)", DefaultKey = "Ctrl+B", Execute = () => SetBase(CurrentBase == "BIB" ? "AUT" : "BIB") });
+        _commands.Add(new Command { Id = "base.bib", Name = "&BIB — Bibliographic", Execute = () => _search.SetBase("BIB") });
+        _commands.Add(new Command { Id = "base.aut", Name = "&AUT — Authority", Execute = () => _search.SetBase("AUT") });
+        _commands.Add(new Command { Id = "base.toggle", Name = "&Switch Base (BIB ⇄ AUT)", DefaultKey = "Ctrl+B", Execute = () => _search.SetBase(_search.CurrentBase == "BIB" ? "AUT" : "BIB") });
         _commands.Add(new Command { Id = "search.focus", Name = "&Search", DefaultKey = "F2", Execute = ShowSearchView });
         _commands.Add(new Command { Id = "help.field", Name = "&Field Help", DefaultKey = "F1", Execute = ShowFieldHelp });
         _commands.Add(new Command { Id = "help.intro", Name = "&Getting Started", Execute = ShowIntro });
@@ -327,114 +272,6 @@ public sealed class MainForm : Form
         switchStrip.Controls.Add(_searchViewButton);
         switchStrip.Controls.Add(_recordViewButton);
 
-        // ----- search view -----
-        // The base is chosen from the Base menu (or Ctrl+B) — one control, not two.
-        // Here we only SHOW which base is active, so the search bar isn't ambiguous.
-        _searchBaseLabel = new Label
-        {
-            AutoSize = false,
-            Width = 46,
-            TextAlign = ContentAlignment.MiddleCenter,
-            Font = new Font("Segoe UI", 9f, FontStyle.Bold),
-            Anchor = AnchorStyles.Left,
-            Text = _currentBase,
-        };
-
-        _searchScope = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150 };
-        PopulateScopes(CurrentBase);
-
-        _sortBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 130 };
-        foreach (var (label, _) in Sorts) _sortBox.Items.Add(label);
-        _sortBox.SelectedIndex = 0;   // deterministic default: Control No.
-        // Changing the sort re-orders the current results in place, no re-query.
-        _sortBox.SelectedIndexChanged += (_, _) => RenderResults();
-
-        _searchBox = new TextBox { Anchor = AnchorStyles.Left | AnchorStyles.Right };
-        _searchBox.KeyDown += (_, e) =>
-        {
-            if (e.KeyCode == Keys.Enter) { RunSearch(); e.SuppressKeyPress = true; }
-            // Down arrow steps straight into the results — no reaching for the
-            // mouse to pick a hit (user request 2026-08-01).
-            else if (e.KeyCode == Keys.Down && _resultsList!.Items.Count > 0) { FocusResults(); e.SuppressKeyPress = true; }
-        };
-        var searchButton = new Button { Text = "Search", Width = 60 };
-        searchButton.Click += (_, _) => RunSearch();
-        var listAllButton = new Button { Text = "List All", Width = 60 };
-        listAllButton.Click += (_, _) => ListAll();
-
-        var searchForm = new TableLayoutPanel
-        {
-            Dock = DockStyle.Top,
-            Height = 32,
-            ColumnCount = 6,
-            Padding = new Padding(2),
-        };
-        searchForm.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        searchForm.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        searchForm.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        searchForm.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        searchForm.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        searchForm.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        searchForm.Controls.Add(_searchBaseLabel, 0, 0);
-        searchForm.Controls.Add(_searchScope, 1, 0);
-        searchForm.Controls.Add(_sortBox, 2, 0);
-        searchForm.Controls.Add(_searchBox, 3, 0);
-        searchForm.Controls.Add(searchButton, 4, 0);
-        searchForm.Controls.Add(listAllButton, 5, 0);
-
-        _resultsList = new ListView
-        {
-            Dock = DockStyle.Fill,
-            View = View.Details,
-            FullRowSelect = true,
-            MultiSelect = false,
-            HideSelection = false,
-        };
-        ConfigureResultColumns(_currentBase);
-        _resultsList.DoubleClick += (_, _) => OpenSelectedResult();
-        _resultsList.KeyDown += (_, e) =>
-        {
-            if (e.KeyCode == Keys.Enter) { OpenSelectedResult(); e.SuppressKeyPress = true; }
-            // Up from the first hit hands focus back to the search box, so the
-            // whole search→pick loop stays on the keyboard.
-            else if (e.KeyCode == Keys.Up && _resultsList.FocusedItem?.Index == 0)
-            {
-                _searchBox.Focus();
-                _searchBox.SelectionStart = _searchBox.TextLength;
-                e.SuppressKeyPress = true;
-            }
-        };
-
-        _historyList = new ListView
-        {
-            Dock = DockStyle.Bottom,
-            Height = 140,
-            View = View.Details,
-            FullRowSelect = true,
-            MultiSelect = false,
-            HideSelection = false,
-        };
-        _historyList.Columns.Add("Search history", 300);
-        _historyList.Columns.Add("Base", 50);
-        _historyList.Columns.Add("Scope", 80);
-        _historyList.Columns.Add("Hits", 50, HorizontalAlignment.Right);
-        _historyList.DoubleClick += (_, _) => RerunFromHistory();
-
-        _moreButton = new Button
-        {
-            Dock = DockStyle.Bottom,
-            Height = 26,
-            Visible = false,
-            FlatStyle = FlatStyle.System,
-        };
-        _moreButton.Click += (_, _) => LoadMoreListAll();
-
-        _searchView = new Panel { Dock = DockStyle.Fill };
-        _searchView.Controls.Add(_resultsList);
-        _searchView.Controls.Add(searchForm);
-        _searchView.Controls.Add(_historyList);
-        _searchView.Controls.Add(_moreButton); // docks above history, just under the results
-
         // ----- record view -----
         _recordHeader = new Label
         {
@@ -496,7 +333,7 @@ public sealed class MainForm : Form
 
         // ----- composition -----
         var rightPanel = new Panel { Dock = DockStyle.Fill };
-        rightPanel.Controls.Add(_searchView);
+        rightPanel.Controls.Add(_search.View);
         rightPanel.Controls.Add(_recordView);
         rightPanel.Controls.Add(switchStrip);
 
@@ -782,20 +619,31 @@ public sealed class MainForm : Form
         return c;
     }
 
+    // ---------- base ----------
+
+    /// <summary>Keeps the Base menu's BIB/AUT checkmarks in step with the active base.
+    /// Passed to <see cref="SearchController"/>, which owns the base and calls this on
+    /// every switch.</summary>
+    private void UpdateBaseChecks(string @base)
+    {
+        _bibItem.Checked = @base == "BIB";
+        _autItem.Checked = @base == "AUT";
+    }
+
     // ---------- view switching ----------
 
     private void ShowSearchView()
     {
-        _searchView.Visible = true;
+        _search.View.Visible = true;
         _recordView.Visible = false;
         _searchViewButton.Font = new Font(_searchViewButton.Font, FontStyle.Bold);
         _recordViewButton.Font = new Font(_recordViewButton.Font, FontStyle.Regular);
-        _searchBox.Focus();
+        _search.FocusSearchBox();
     }
 
     private void ShowRecordView()
     {
-        _searchView.Visible = false;
+        _search.View.Visible = false;
         _recordView.Visible = true;
         _recordViewButton.Font = new Font(_recordViewButton.Font, FontStyle.Bold);
         _searchViewButton.Font = new Font(_searchViewButton.Font, FontStyle.Regular);
@@ -898,11 +746,7 @@ public sealed class MainForm : Form
         // A different catalogue means different record ids: everything on
         // screen belonged to the old one.
         _openList.Items.Clear();
-        _resultsList.Items.Clear();
-        _currentResults = Array.Empty<RecordSummary>();
-        _listAllMode = false;
-        UpdateMoreButton();
-        _historyList.Items.Clear();
+        _search.Reset();
         ClearViewer();
         ShowSearchView();
 
@@ -918,242 +762,7 @@ public sealed class MainForm : Form
             + (drafts > 0 ? $" {drafts} draft(s) reopened." : ""));
     }
 
-    // ---------- base ----------
-
-    private void SetBase(string @base)
-    {
-        bool baseChanged = _currentBase != @base;
-        _currentBase = @base;
-        _bibItem.Checked = @base == "BIB";
-        _autItem.Checked = @base == "AUT";
-        _searchBaseLabel.Text = @base;
-        PopulateScopes(@base);
-        // The two bases have different result columns; switching clears the now-stale
-        // hits from the other base so rows never sit under the wrong header.
-        if (baseChanged)
-        {
-            ConfigureResultColumns(@base);
-            _resultsList.Items.Clear();
-            _currentResults = Array.Empty<RecordSummary>();
-        }
-        _listAllMode = false; // a paged listing belongs to the base it was started on
-        UpdateMoreButton();
-    }
-
-    /// <summary>Fills the scope dropdown with the current base's indexes (BIB and
-    /// AUT are entirely different). No-op when the base's list is already shown, so
-    /// switching to the same base doesn't wipe the user's chosen scope.</summary>
-    private void PopulateScopes(string @base)
-    {
-        if (@base == _scopesBase && _searchScope.Items.Count > 0) return;
-        _scopesBase = @base;
-        _scopes = @base == "AUT" ? AutScopes : BibScopes;
-        _searchScope.Items.Clear();
-        foreach (var (label, _) in _scopes) _searchScope.Items.Add(label);
-        _searchScope.SelectedIndex = 0;
-    }
-
-    // ---------- search ----------
-
-    private void RunSearch()
-    {
-        if (!RequireCatalogue()) return;
-        string query = _searchBox.Text.Trim();
-        if (query.Length == 0) return;
-
-        var scope = _scopes[_searchScope.SelectedIndex].Scope;
-        var ids = _repo.Search(CurrentBase, query, scope);
-
-        _history.Add(new SearchHistoryEntry(query, scope, CurrentBase, ids.Count));
-        RefreshHistoryList();
-
-        // Hydrate ONLY the hits (never the whole base): FTS returns ≤200 ids, so this
-        // stays fast at any catalogue size. ids arrive in FTS relevance order; keep that
-        // as the base order so the Relevance sort can reproduce it (other sorts reorder
-        // in RenderResults).
-        var byId = _repo.ListByIds(ids).ToDictionary(s => s.Id);
-        _currentResults = ids.Select(id => byId.GetValueOrDefault(id)).Where(s => s != null).Cast<RecordSummary>().ToList();
-        _listAllMode = false; // a search is not a paged list
-        UpdateMoreButton();
-        RenderResults();
-        SetMessage($"{ids.Count} hit(s) for \"{query}\" in {CurrentBase}.");
-    }
-
-    /// <summary>The explicit whole-base listing, paged: shows the first
-    /// <see cref="ListPageSize"/> records and offers a "Load next N" bar to keep going —
-    /// so opening a 500,000-record base never tries to build one giant list. Feeds the
-    /// same sort dropdown; natural order is control-number, which is also the default.</summary>
-    private void ListAll()
-    {
-        if (!RequireCatalogue()) return;
-        _listAllMode = true;
-        _listAllTotal = _repo.Count(CurrentBase);
-        _currentResults = _repo.ListPage(CurrentBase, ListPageSize, 0);
-        UpdateMoreButton();
-        RenderResults();
-        SetMessage($"{CurrentBase}: showing {_currentResults.Count:N0} of {_listAllTotal:N0} record(s).");
-    }
-
-    /// <summary>Loads and appends the next page of a List All, then updates the bar.</summary>
-    private void LoadMoreListAll()
-    {
-        if (!_listAllMode || _repo is null) return;
-        var next = _repo.ListPage(CurrentBase, ListPageSize, _currentResults.Count);
-        _currentResults = _currentResults.Concat(next).ToList();
-        UpdateMoreButton();
-        RenderResults();
-        SetMessage($"{CurrentBase}: showing {_currentResults.Count:N0} of {_listAllTotal:N0} record(s).");
-    }
-
-    /// <summary>Shows the "Load next N" bar with the remaining count while a paged List
-    /// All has more to load; hides it otherwise (including for searches).</summary>
-    private void UpdateMoreButton()
-    {
-        if (_moreButton is null) return;
-        int remaining = _listAllMode ? _listAllTotal - _currentResults.Count : 0;
-        if (remaining > 0)
-        {
-            _moreButton.Text =
-                $"Load next {Math.Min(ListPageSize, remaining):N0}   (showing {_currentResults.Count:N0} of {_listAllTotal:N0})";
-            _moreButton.Visible = true;
-        }
-        else
-        {
-            _moreButton.Visible = false;
-        }
-    }
-
-    /// <summary>Orders <see cref="_currentResults"/> by the chosen sort and fills the
-    /// list. Relevance keeps the incoming (FTS rank) order; the deterministic sorts
-    /// are stable, so ties keep that same underlying order.</summary>
-    private void RenderResults()
-    {
-        var sort = Sorts[_sortBox.SelectedIndex].Sort;
-        IEnumerable<RecordSummary> ordered = sort switch
-        {
-            ResultSort.Title => _currentResults.OrderBy(s => s.Title, StringComparer.CurrentCultureIgnoreCase),
-            ResultSort.Author => _currentResults.OrderBy(s => s.Author, StringComparer.CurrentCultureIgnoreCase),
-            ResultSort.ControlNumber => _currentResults.OrderBy(s => ControlNumberKey(s.ControlNumber)),
-            _ => _currentResults,   // Relevance: as-is
-        };
-        FillResults(ordered);
-    }
-
-    /// <summary>Sort key for a 001: numeric when it is a plain integer (so 2 &lt; 10),
-    /// otherwise a large sentinel so odd/blank values fall to the end in a stable
-    /// way. Ties among those keep the underlying order.</summary>
-    private static long ControlNumberKey(string? controlNumber) =>
-        long.TryParse(controlNumber, out long n) ? n : long.MaxValue;
-
-    /// <summary>The result-list columns differ by base: a bibliographic record is
-    /// Title / Author / Year, an authority is Classification / Heading / Source keyed
-    /// by its accession number (task 2). Called on base switch, so the header always
-    /// matches what's shown.</summary>
-    private void ConfigureResultColumns(string @base)
-    {
-        _resultsList.Columns.Clear();
-        if (@base == "AUT")
-        {
-            _resultsList.Columns.Add("aut-000", 70);
-            _resultsList.Columns.Add("Classification", 110);
-            _resultsList.Columns.Add("Heading", 300);
-            _resultsList.Columns.Add("Source", 220);
-        }
-        else
-        {
-            _resultsList.Columns.Add("bib-000", 70);
-            _resultsList.Columns.Add("Title", 300);
-            _resultsList.Columns.Add("Author", 180);
-            _resultsList.Columns.Add("Year", 50);
-            _resultsList.Columns.Add("Status", 60);
-        }
-    }
-
-    private void FillResults(IEnumerable<RecordSummary> summaries)
-    {
-        _resultsList.BeginUpdate();
-        _resultsList.Items.Clear();
-        foreach (var s in summaries)
-        {
-            var item = new ListViewItem(s.ControlNumber ?? "");
-            if (s.Base == "AUT")
-            {
-                item.SubItems.Add(s.Classification);
-                item.SubItems.Add(s.Title);   // the full 1XX heading
-                item.SubItems.Add(s.Source);
-            }
-            else
-            {
-                item.SubItems.Add(s.Title);
-                item.SubItems.Add(s.Author);
-                item.SubItems.Add(s.Year);
-                item.SubItems.Add(s.Status == RecordStatus.Pushed ? "pushed" : "draft");
-            }
-            item.Tag = s;
-            _resultsList.Items.Add(item);
-        }
-        _resultsList.EndUpdate();
-    }
-
-    /// <summary>Moves the keyboard into the results list, selecting the first hit
-    /// if none is selected — the entry point for arrow-key navigation.</summary>
-    private void FocusResults()
-    {
-        if (_resultsList.Items.Count == 0) return;
-        var item = _resultsList.SelectedItems.Count > 0 ? _resultsList.SelectedItems[0] : _resultsList.Items[0];
-        item.Selected = true;
-        item.Focused = true;
-        _resultsList.EnsureVisible(item.Index);
-        _resultsList.Focus();
-    }
-
-    /// <summary>The display label for a scope, from whichever base's list defines it
-    /// (search history can hold entries from either base).</summary>
-    private static string ScopeLabel(SearchScope scope)
-    {
-        foreach (var list in new[] { BibScopes, AutScopes })
-        {
-            int i = Array.FindIndex(list, s => s.Scope == scope);
-            if (i >= 0) return list[i].Label;
-        }
-        return scope.ToString();
-    }
-
-    private void RefreshHistoryList()
-    {
-        _historyList.BeginUpdate();
-        _historyList.Items.Clear();
-        foreach (var e in _history.Entries)
-        {
-            var item = new ListViewItem(e.Query);
-            item.SubItems.Add(e.Base);
-            item.SubItems.Add(ScopeLabel(e.Scope));
-            item.SubItems.Add(e.Hits.ToString());
-            item.Tag = e;
-            _historyList.Items.Add(item);
-        }
-        _historyList.EndUpdate();
-    }
-
-    private void RerunFromHistory()
-    {
-        if (_historyList.SelectedItems.Count == 0) return;
-        var e = (SearchHistoryEntry)_historyList.SelectedItems[0].Tag!;
-        SetBase(e.Base);   // repopulates the scope list for that base
-        _searchBox.Text = e.Query;
-        int idx = Array.FindIndex(_scopes, s => s.Scope == e.Scope);
-        _searchScope.SelectedIndex = idx >= 0 ? idx : 0;
-        RunSearch();
-    }
-
     // ---------- open records (sidebar) ----------
-
-    private void OpenSelectedResult()
-    {
-        if (_repo is null || _resultsList.SelectedItems.Count == 0) return;
-        var s = (RecordSummary)_resultsList.SelectedItems[0].Tag!;
-        OpenRecordById(s.Id);
-    }
 
     /// <summary>Opens a stored record into the sidebar by id — selecting it if it
     /// is already open rather than duplicating. Shared by result double-click and
@@ -2339,11 +1948,11 @@ public sealed class MainForm : Form
     private void ExportBase()
     {
         if (!RequireCatalogue()) return;
-        int count = _repo.Count(CurrentBase);
-        if (count == 0) { SetMessage($"{CurrentBase} is empty — nothing to export."); return; }
-        ExportTo($"{CurrentBase}.mrk", path =>
+        int count = _repo.Count(_search.CurrentBase);
+        if (count == 0) { SetMessage($"{_search.CurrentBase} is empty — nothing to export."); return; }
+        ExportTo($"{_search.CurrentBase}.mrk", path =>
         {
-            new ExportEngine(_repo).ExportBaseToFile(CurrentBase, path);
+            new ExportEngine(_repo).ExportBaseToFile(_search.CurrentBase, path);
             return count;
         });
     }
