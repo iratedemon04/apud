@@ -40,8 +40,8 @@ public sealed class ImportWizardForm : Form
         MinimizeBox = false;
         MaximizeBox = false;
         ShowInTaskbar = false;
-        Size = new Size(760, 560);
-        MinimumSize = new Size(640, 480);
+        Size = new Size(780, 620);
+        MinimumSize = new Size(660, 540);
 
         int warnings = report.Files.Sum(f => f.Diagnostics.Count(d => d.Severity == MrkSeverity.Warning));
         int errors = report.Files.Sum(f => f.Diagnostics.Count(d => d.Severity == MrkSeverity.Error));
@@ -112,19 +112,25 @@ public sealed class ImportWizardForm : Form
         };
 
         // ----- footer: mode choice + buttons -----
+        // AutoSize=false + a generous height lets the caption wrap to multiple lines
+        // instead of being clipped; TopLeft keeps the box aligned with the first line.
         _asPushed = new RadioButton
         {
             Text = "Import as PUSHED — trusted migration; records keep their 001s and enter search immediately. Requires a run with no problems at all.",
             AutoSize = false,
             Dock = DockStyle.Top,
-            Height = 22,
+            Height = 40,
+            TextAlign = ContentAlignment.TopLeft,
+            CheckAlign = ContentAlignment.TopLeft,
         };
         _asDrafts = new RadioButton
         {
             Text = "Import as DRAFTS — records stay out of search until pushed; parse problems tolerated. Duplicate 001s always block the run.",
             AutoSize = false,
             Dock = DockStyle.Top,
-            Height = 22,
+            Height = 40,
+            TextAlign = ContentAlignment.TopLeft,
+            CheckAlign = ContentAlignment.TopLeft,
             Checked = true, // default to the safe, non-committal mode (user request 2026-08-02)
         };
         _asPushed.CheckedChanged += (_, _) => UpdateImportEnabled();
@@ -135,7 +141,9 @@ public sealed class ImportWizardForm : Form
             Text = "Normalize coded fixed fields — rewrite blank placeholders ('\\' and '^') in the leader and 006/007/008 as real spaces. Applies to both modes; setting is remembered.",
             AutoSize = false,
             Dock = DockStyle.Top,
-            Height = 22,
+            Height = 40,
+            TextAlign = ContentAlignment.TopLeft,
+            CheckAlign = ContentAlignment.TopLeft,
             Checked = normalizeFixedFields,
         };
         _normalizeEncoding = new CheckBox
@@ -143,7 +151,9 @@ public sealed class ImportWizardForm : Form
             Text = "Normalize LDR encoding — set the character coding scheme (LDR/09) to 'a' (Unicode) so the leader matches the UTF-8 data. Applies to both modes; setting is remembered.",
             AutoSize = false,
             Dock = DockStyle.Top,
-            Height = 22,
+            Height = 40,
+            TextAlign = ContentAlignment.TopLeft,
+            CheckAlign = ContentAlignment.TopLeft,
             Checked = normalizeEncoding,
         };
 
@@ -168,7 +178,7 @@ public sealed class ImportWizardForm : Form
 
         // Docked top, so the last control added sits highest: pushed, drafts, then the two
         // normalize checkboxes underneath both radios (fill-fields above encoding).
-        var footer = new Panel { Dock = DockStyle.Bottom, Height = 136, Padding = new Padding(8, 4, 8, 0) };
+        var footer = new Panel { Dock = DockStyle.Bottom, Height = 176, Padding = new Padding(8, 4, 8, 0) };
         footer.Controls.Add(_normalizeEncoding);
         footer.Controls.Add(_normalize);
         footer.Controls.Add(_asDrafts);
