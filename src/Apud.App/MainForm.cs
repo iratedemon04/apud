@@ -834,14 +834,31 @@ public sealed class MainForm : Form
 
     private void RemoveOpenRecords(List<ListViewItem> items)
     {
+        // Closing a record removes it from the workspace for good. A saved draft's
+        // "workspace" is its .mrk file (the draft folder IS the reopen set), so closing
+        // one must delete that file — otherwise it silently reloads next launch (user,
+        // 2026-08-17: closed drafts kept coming back). Warn about anything that would be
+        // lost: unsaved edits, and saved drafts whose files will be discarded.
         int dirty = items.Count(i => i.Tag is EditorDocument { Dirty: true });
-        if (dirty > 0 && MessageBox.Show(this,
-                $"{dirty} record(s) have unsaved changes. Remove anyway?",
-                "Remove Records", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+        int savedDrafts = items.Count(i => i.Tag is EditorDocument { Dirty: false, DraftId: not null });
+
+        var warn = new List<string>();
+        if (dirty > 0) warn.Add($"{dirty} record(s) have unsaved changes that will be lost");
+        if (savedDrafts > 0) warn.Add($"{savedDrafts} saved draft(s) will be discarded");
+        if (warn.Count > 0 && MessageBox.Show(this,
+                string.Join(", and ", warn) + ".\n\n" +
+                "Closing a draft deletes its saved file, so it will not reopen. Remove anyway?",
+                "Remove Records", MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2) != DialogResult.Yes)
             return;
 
         foreach (var item in items)
         {
+            if (item.Tag is EditorDocument { DraftId: { } draftId } doc)
+            {
+                _drafts?.Delete(draftId); // remove the persisted file so it won't reload
+                doc.DraftId = null;
+            }
             if (ReferenceEquals(item.Tag, _currentDoc)) _currentDoc = null;
             _openList.Items.Remove(item);
         }
