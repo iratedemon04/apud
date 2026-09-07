@@ -255,19 +255,20 @@ public class PushServiceTests : IDisposable
     // ---------- authority stage ----------
 
     [Fact]
-    public void A_link_to_a_missing_authority_blocks_the_push()
+    public void A_link_to_a_missing_authority_warns_but_does_not_block_the_push()
     {
         var rec = new StoredRecord("BIB", CleanBib(
             Data("700", '1', ' ', ('a', "Somebody"))));
         rec.Record.Fields.Last(f => f.Tag == "700").AuthLinkId = 99999; // no such record
 
         var result = Push(rec);
-        Assert.False(result.Ok);
-        Assert.Contains(result.Findings, f => f.Code == "auth.missing");
+        Assert.True(result.Ok); // a rotted link must not block the push (user, 2026-09-06)
+        var finding = Assert.Single(result.Findings, f => f.Code == "auth.missing");
+        Assert.False(finding.IsError); // surfaced as a warning, same message
     }
 
     [Fact]
-    public void A_link_whose_heading_drifted_blocks_the_push()
+    public void A_link_whose_heading_drifted_warns_but_does_not_block_the_push()
     {
         var auth = InsertPushedAuthority("Moreno, Matías");
         var rec = new StoredRecord("BIB", CleanBib(
@@ -275,8 +276,9 @@ public class PushServiceTests : IDisposable
         rec.Record.Fields.Last(f => f.Tag == "700").AuthLinkId = auth.Id;
 
         var result = Push(rec);
-        Assert.False(result.Ok);
-        Assert.Contains(result.Findings, f => f.Code == "auth.drift");
+        Assert.True(result.Ok); // heading no longer matching any authority is a warning now
+        var finding = Assert.Single(result.Findings, f => f.Code == "auth.drift");
+        Assert.False(finding.IsError);
     }
 
     [Fact]

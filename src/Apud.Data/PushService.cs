@@ -62,9 +62,12 @@ public sealed class PushService
 
     // ---------- stage 4: authority ----------
 
-    /// <summary>A stored heading link that has rotted is an error the cataloguer
-    /// must re-forge (Ctrl+F4): the linked authority was deleted, or its 1XX text
-    /// drifted from what the bib field says. An UNLINKED controlled field is NOT
+    /// <summary>A stored heading link that has rotted is flagged for the cataloguer
+    /// to re-forge (Ctrl+F4): the linked authority was deleted, or its 1XX text
+    /// drifted from what the bib field says. These are WARNINGS, not errors — a
+    /// heading that no longer matches any authority must not block the push (user,
+    /// 2026-09-06); the same message still surfaces in the pre-push warning popup so
+    /// the cataloguer can re-link at will. An UNLINKED controlled field is NOT
     /// flagged — authority control is aspirational, and blocking every unlinked
     /// 650 would make a real catalogue un-pushable (scope call, docs/DEFERRED.md).</summary>
     private void AuthorityStage(StoredRecord rec, List<ValidationFinding> findings)
@@ -81,14 +84,14 @@ public sealed class PushService
             var authField = auth is null ? null : Headings.AuthorizedField(auth.Record);
             if (authField is null)
             {
-                findings.Add(new(Severity.Error, FieldRef.Field(i), "auth.missing",
+                findings.Add(new(Severity.Warning, FieldRef.Field(i), "auth.missing",
                     $"Field {field.Tag} is linked to an authority record that no longer exists — re-link it (Ctrl+F4)."));
                 continue;
             }
 
             if (HeadingNormalization.Normalize(Headings.HeadingText(field))
                 != HeadingNormalization.Normalize(Headings.HeadingText(authField)))
-                findings.Add(new(Severity.Error, FieldRef.Field(i), "auth.drift",
+                findings.Add(new(Severity.Warning, FieldRef.Field(i), "auth.drift",
                     $"Field {field.Tag} no longer matches its linked authorized heading — re-link it (Ctrl+F4)."));
         }
     }

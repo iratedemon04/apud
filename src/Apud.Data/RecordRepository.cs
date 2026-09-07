@@ -153,7 +153,11 @@ public sealed class RecordRepository
                 fieldId = (long)cmd.ExecuteScalar()!;
             }
 
-            if (f.AuthLinkId is long auth)
+            // Skip a link to an authority that no longer exists. Such a rotted link is
+            // surfaced as a (non-blocking) warning at push time — it must not crash the
+            // write on the heading_link foreign key; the field is simply stored unlinked
+            // until the cataloguer re-links it (Ctrl+F4).
+            if (f.AuthLinkId is long auth && AuthorityExists(tx, auth))
             {
                 Execute(tx, "INSERT INTO heading_link (field_id, auth_record_id) VALUES ($f, $a)",
                     ("$f", fieldId), ("$a", auth));
@@ -694,6 +698,15 @@ public sealed class RecordRepository
     {
         var chunks = packed.Split(MarcConstants.SubfieldDelimiter, StringSplitOptions.RemoveEmptyEntries);
         return string.Join("--", chunks.Select(c => c.Substring(1)));
+    }
+
+    private bool AuthorityExists(SqliteTransaction tx, long id)
+    {
+        using var cmd = _db.Connection.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "SELECT 1 FROM record WHERE id = $id AND base = 'AUT'";
+        cmd.Parameters.AddWithValue("$id", id);
+        return cmd.ExecuteScalar() != null;
     }
 
     private void Execute(SqliteTransaction? tx, string sql, params (string, object)[] args)

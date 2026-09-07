@@ -518,6 +518,18 @@ public sealed class RecordGrid : Panel, IMessageFilter
     private void OnBoxTextChanged(TextBox box)
     {
         if (_suspendCommit || !box.Focused || box.Tag is not BoxSpec spec) return;
+
+        // A wide (value/control/leader) box wraps its text internally, but each row's
+        // height is fixed only at layout time (rebuild/resize) — so while typing past
+        // the right edge the wrapped line is hidden below the one-line-tall box and the
+        // textbox scrolls the earlier text up out of view ("goes up into the air").
+        // Re-run layout on each keystroke so the row grows to fit the wrapped text live.
+        if (spec.Part is BoxPart.Value or BoxPart.ControlData or BoxPart.Leader)
+        {
+            LayoutRows();
+            return;
+        }
+
         if (box.MaxLength <= 0 || box.TextLength < box.MaxLength) return;
 
         // A filled fixed-width box hands off to the next so the cataloguer types
