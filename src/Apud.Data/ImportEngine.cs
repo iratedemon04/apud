@@ -86,6 +86,11 @@ public sealed record ImportResult(int RecordsImported, int BibCount, int AutCoun
 /// </summary>
 public sealed class ImportEngine
 {
+    /// <summary>How often <see cref="Commit"/> fires its progress callback (in records).
+    /// Coarse enough that reporting is negligible next to the inserts, fine enough that a
+    /// 50k import moves the bar smoothly.</summary>
+    private const int ProgressStride = 100;
+
     private readonly RecordRepository _repo;
 
     public ImportEngine(RecordRepository repo) => _repo = repo;
@@ -145,7 +150,11 @@ public sealed class ImportEngine
     /// transaction (all-or-nothing) — the trusted-migration path. Import-as-drafts does
     /// NOT come here: drafts are opened as unsaved working records in the app and never
     /// touch the DB (user, 2026-08-08). Blocks if the run cannot commit as pushed.</summary>
-    public ImportResult Commit(ImportPlan plan)
+    /// <param name="progress">Optional callback, invoked with the running count of records
+    /// inserted (every <see cref="ProgressStride"/> records, plus once at the end). Lets a
+    /// long import drive a progress bar. It is called on whatever thread runs Commit — the
+    /// UI-thread caller runs Commit on a background thread, so the callback must marshal.</param>
+    public ImportResult Commit(ImportPlan plan, Action<int>? progress = null)
     {
         if (!plan.Report.CanCommitAsPushed)
             throw new InvalidOperationException("Import run has errors and cannot be committed AS-PUSHED; see the report.");
@@ -156,6 +165,7 @@ public sealed class ImportEngine
         var now = DateTime.UtcNow;
 
         using var tx = _repo.BeginTransaction(); // disposed uncommitted = rolled back
+        int done = 0;
         foreach (var p in plan.Records)
         {
             var stored = new StoredRecord(p.Base, p.Record) { Status = RecordStatus.Pushed };
@@ -165,7 +175,10 @@ public sealed class ImportEngine
             if (p.Base == "BIB") bib++; else aut++;
             if (long.TryParse(p.Record.ControlNumber, out long n) && n > highest[p.Base])
                 highest[p.Base] = n;
+
+            if (progress != null && ++done % ProgressStride == 0) progress(done);
         }
+        progress?.Invoke(bib + aut); // final tick, so the bar always lands on 100%
 
         foreach (var (@base, top) in highest)
             if (top > 0)

@@ -24,8 +24,6 @@ namespace Apud.App;
 /// </summary>
 public sealed class SearchController
 {
-    private const int ListPageSize = 1000;
-
     private readonly Func<RecordRepository?> _repo;
     private readonly Func<bool> _requireCatalogue;
     private readonly Action<string> _setMessage;
@@ -71,8 +69,8 @@ public sealed class SearchController
 
     /// <summary>How the result set is ordered. Relevance keeps the FTS rank order
     /// (a keyword search's best-match-first); the rest are deterministic sorts the
-    /// cataloguer chooses, ILS-style. Default is Control No. — predictable, always
-    /// defined, and the same order as List All.</summary>
+    /// cataloguer chooses, ILS-style. Default is Control No. — predictable and always
+    /// defined.</summary>
     private enum ResultSort { ControlNumber, Title, Author, Relevance }
 
     private static readonly (string Label, ResultSort Sort)[] Sorts =
@@ -90,10 +88,7 @@ public sealed class SearchController
     private readonly ListView _resultsList;
     private readonly ListView _historyList;
     private readonly SearchHistory _history = new();
-    private readonly Button _moreButton;
     private IReadOnlyList<RecordSummary> _currentResults = Array.Empty<RecordSummary>();
-    private bool _listAllMode;            // true while a paged whole-base listing is shown
-    private int _listAllTotal;            // total records in the base being paged
 
     private string _currentBase = "BIB"; // the single source of truth for the active base (menu + Ctrl+B drive it)
 
@@ -148,14 +143,12 @@ public sealed class SearchController
         };
         var searchButton = new Button { Text = "Search", Width = 60 };
         searchButton.Click += (_, _) => RunSearch();
-        var listAllButton = new Button { Text = "List All", Width = 60 };
-        listAllButton.Click += (_, _) => ListAll();
 
         var searchForm = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
             Height = 32,
-            ColumnCount = 6,
+            ColumnCount = 5,
             Padding = new Padding(2),
         };
         searchForm.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -163,13 +156,11 @@ public sealed class SearchController
         searchForm.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         searchForm.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         searchForm.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        searchForm.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         searchForm.Controls.Add(_searchBaseLabel, 0, 0);
         searchForm.Controls.Add(_searchScope, 1, 0);
         searchForm.Controls.Add(_sortBox, 2, 0);
         searchForm.Controls.Add(_searchBox, 3, 0);
         searchForm.Controls.Add(searchButton, 4, 0);
-        searchForm.Controls.Add(listAllButton, 5, 0);
 
         _resultsList = new ListView
         {
@@ -209,20 +200,10 @@ public sealed class SearchController
         _historyList.Columns.Add("Hits", 50, HorizontalAlignment.Right);
         _historyList.DoubleClick += (_, _) => RerunFromHistory();
 
-        _moreButton = new Button
-        {
-            Dock = DockStyle.Bottom,
-            Height = 26,
-            Visible = false,
-            FlatStyle = FlatStyle.System,
-        };
-        _moreButton.Click += (_, _) => LoadMoreListAll();
-
         View = new Panel { Dock = DockStyle.Fill };
         View.Controls.Add(_resultsList);
         View.Controls.Add(searchForm);
         View.Controls.Add(_historyList);
-        View.Controls.Add(_moreButton); // docks above history, just under the results
     }
 
     /// <summary>Puts the keyboard in the search box (used when the Search view is shown).</summary>
@@ -235,8 +216,6 @@ public sealed class SearchController
     {
         _resultsList.Items.Clear();
         _currentResults = Array.Empty<RecordSummary>();
-        _listAllMode = false;
-        UpdateMoreButton();
         _historyList.Items.Clear();
     }
 
@@ -257,8 +236,6 @@ public sealed class SearchController
             _resultsList.Items.Clear();
             _currentResults = Array.Empty<RecordSummary>();
         }
-        _listAllMode = false; // a paged listing belongs to the base it was started on
-        UpdateMoreButton();
     }
 
     /// <summary>Fills the scope dropdown with the current base's indexes (BIB and
@@ -295,56 +272,8 @@ public sealed class SearchController
         // in RenderResults).
         var byId = repo.ListByIds(ids).ToDictionary(s => s.Id);
         _currentResults = ids.Select(id => byId.GetValueOrDefault(id)).Where(s => s != null).Cast<RecordSummary>().ToList();
-        _listAllMode = false; // a search is not a paged list
-        UpdateMoreButton();
         RenderResults();
         _setMessage($"{ids.Count} hit(s) for \"{query}\" in {CurrentBase}.");
-    }
-
-    /// <summary>The explicit whole-base listing, paged: shows the first
-    /// <see cref="ListPageSize"/> records and offers a "Load next N" bar to keep going —
-    /// so opening a 500,000-record base never tries to build one giant list. Feeds the
-    /// same sort dropdown; natural order is control-number, which is also the default.</summary>
-    private void ListAll()
-    {
-        if (!_requireCatalogue()) return;
-        var repo = _repo()!;
-        _listAllMode = true;
-        _listAllTotal = repo.Count(CurrentBase);
-        _currentResults = repo.ListPage(CurrentBase, ListPageSize, 0);
-        UpdateMoreButton();
-        RenderResults();
-        _setMessage($"{CurrentBase}: showing {_currentResults.Count:N0} of {_listAllTotal:N0} record(s).");
-    }
-
-    /// <summary>Loads and appends the next page of a List All, then updates the bar.</summary>
-    private void LoadMoreListAll()
-    {
-        var repo = _repo();
-        if (!_listAllMode || repo is null) return;
-        var next = repo.ListPage(CurrentBase, ListPageSize, _currentResults.Count);
-        _currentResults = _currentResults.Concat(next).ToList();
-        UpdateMoreButton();
-        RenderResults();
-        _setMessage($"{CurrentBase}: showing {_currentResults.Count:N0} of {_listAllTotal:N0} record(s).");
-    }
-
-    /// <summary>Shows the "Load next N" bar with the remaining count while a paged List
-    /// All has more to load; hides it otherwise (including for searches).</summary>
-    private void UpdateMoreButton()
-    {
-        if (_moreButton is null) return;
-        int remaining = _listAllMode ? _listAllTotal - _currentResults.Count : 0;
-        if (remaining > 0)
-        {
-            _moreButton.Text =
-                $"Load next {Math.Min(ListPageSize, remaining):N0}   (showing {_currentResults.Count:N0} of {_listAllTotal:N0})";
-            _moreButton.Visible = true;
-        }
-        else
-        {
-            _moreButton.Visible = false;
-        }
     }
 
     /// <summary>Orders <see cref="_currentResults"/> by the chosen sort and fills the

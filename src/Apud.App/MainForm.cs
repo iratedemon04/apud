@@ -1925,35 +1925,115 @@ public sealed class MainForm : Form
             _appState.NormalizeEncodingOnImport = wizard.NormalizeEncoding;
             _appState.Save();
         }
-        if (wizard.NormalizeFixedFields) ImportEngine.Normalize(plan);
-        if (wizard.NormalizeEncoding) ImportEngine.NormalizeEncoding(plan);
-
         // Import-as-drafts: bring dirty LC records in as UNSAVED working drafts to
         // clean up, not into the catalogue (user, 2026-08-08). They live only in the
         // session — Ctrl+D saves one as a draft file, Ctrl+L pushes it, and any left
-        // unsaved are discarded on close (correct behaviour).
+        // unsaved are discarded on close (correct behaviour). This is the small-batch
+        // path (a handful of dirty LC records), so the normalize + sidebar build stay
+        // on the UI thread.
         if (wizard.SelectedMode == ImportMode.AsDrafts)
         {
+            if (wizard.NormalizeFixedFields) ImportEngine.Normalize(plan);
+            if (wizard.NormalizeEncoding) ImportEngine.NormalizeEncoding(plan);
             OpenImportedDrafts(new ImportEngine(_repo!).ParsedRecords(plan));
             return;
         }
 
-        try
+        // Pushed path: this is the whole-catalogue case (tens of thousands of records
+        // seen in the wild). Normalize + Commit run on a background thread behind a modal
+        // progress dialog, so the window keeps repainting (no "Not Responding") and the
+        // cataloguer watches it move instead of guessing whether it hung.
+        CommitImportWithProgress(plan, wizard.NormalizeFixedFields, wizard.NormalizeEncoding);
+    }
+
+    /// <summary>Runs the pushed-import Commit (and any normalize passes) off the UI thread
+    /// behind a modal progress bar. The dialog owns a nested message loop while
+    /// <see cref="Task.Run"/> does the work, so the UI stays live; the background task
+    /// closes the dialog when it finishes or throws. Nothing else can touch the repo while
+    /// the modal is up, so the single-connection SQLite repo is never hit concurrently.</summary>
+    private void CommitImportWithProgress(ImportPlan plan, bool normalizeFixed, bool normalizeEncoding)
+    {
+        int total = plan.Report.TotalRecords;
+
+        using var dialog = new Form
         {
-            var result = new ImportEngine(_repo!).Commit(plan);
-            SetMessage($"Imported {result.RecordsImported} record(s) — BIB {result.BibCount}, AUT {result.AutCount}.");
-            // A single pushed record opens straight into the editor — no hunting for
-            // it in search afterwards (task 1).
-            if (result.ImportedIds.Count == 1)
-                OpenRecordById(result.ImportedIds[0]);
-        }
-        catch (Microsoft.Data.Sqlite.SqliteException e)
+            Text = "Importing…",
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            StartPosition = FormStartPosition.CenterParent,
+            ControlBox = false,          // no close/minimize: the task, not the user, ends it
+            MinimizeBox = false,
+            MaximizeBox = false,
+            ClientSize = new Size(380, 92),
+        };
+        var label = new Label
+        {
+            Text = $"Preparing {total:N0} record(s)…",
+            Location = new Point(16, 16),
+            Size = new Size(348, 22),
+        };
+        var bar = new ProgressBar
+        {
+            Location = new Point(16, 46),
+            Size = new Size(348, 24),
+            Minimum = 0,
+            Maximum = Math.Max(total, 1),
+        };
+        dialog.Controls.Add(label);
+        dialog.Controls.Add(bar);
+
+        // Progress<T> captures this (UI) thread's context, so its callback marshals back here.
+        var progress = new Progress<int>(done =>
+        {
+            bar.Value = Math.Min(done, bar.Maximum);
+            label.Text = $"Importing {done:N0} of {total:N0} record(s)…";
+        });
+
+        ImportResult? result = null;
+        Exception? failure = null;
+
+        dialog.Shown += async (_, _) =>
+        {
+            try
+            {
+                result = await Task.Run(() =>
+                {
+                    if (normalizeFixed) ImportEngine.Normalize(plan);
+                    if (normalizeEncoding) ImportEngine.NormalizeEncoding(plan);
+                    return new ImportEngine(_repo!).Commit(plan, ((IProgress<int>)progress).Report);
+                });
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+            finally
+            {
+                dialog.Close();
+            }
+        };
+        dialog.ShowDialog(this); // blocks until the background task closes it
+
+        if (failure is Microsoft.Data.Sqlite.SqliteException e)
         {
             // e.g. a record inserted between Analyze and Commit now collides;
             // the transaction rolled back — the catalogue is untouched.
             MessageBox.Show(this, $"Import failed and nothing was committed.\n\n{e.Message}",
                 "Import", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
         }
+        if (failure is not null)
+        {
+            MessageBox.Show(this, $"Import failed and nothing was committed.\n\n{failure.Message}",
+                "Import", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+        if (result is null) return;
+
+        SetMessage($"Imported {result.RecordsImported} record(s) — BIB {result.BibCount}, AUT {result.AutCount}.");
+        // A single pushed record opens straight into the editor — no hunting for
+        // it in search afterwards (task 1).
+        if (result.ImportedIds.Count == 1)
+            OpenRecordById(result.ImportedIds[0]);
     }
 
     /// <summary>Import-as-drafts: open each parsed record as an UNSAVED working draft
