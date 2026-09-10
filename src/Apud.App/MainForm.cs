@@ -1955,38 +1955,10 @@ public sealed class MainForm : Form
     {
         int total = plan.Report.TotalRecords;
 
-        using var dialog = new Form
-        {
-            Text = "Importing…",
-            FormBorderStyle = FormBorderStyle.FixedDialog,
-            StartPosition = FormStartPosition.CenterParent,
-            ControlBox = false,          // no close/minimize: the task, not the user, ends it
-            MinimizeBox = false,
-            MaximizeBox = false,
-            ClientSize = new Size(380, 92),
-        };
-        var label = new Label
-        {
-            Text = $"Preparing {total:N0} record(s)…",
-            Location = new Point(16, 16),
-            Size = new Size(348, 22),
-        };
-        var bar = new ProgressBar
-        {
-            Location = new Point(16, 46),
-            Size = new Size(348, 24),
-            Minimum = 0,
-            Maximum = Math.Max(total, 1),
-        };
-        dialog.Controls.Add(label);
-        dialog.Controls.Add(bar);
+        using var dialog = new ImportProgressForm(total);
 
         // Progress<T> captures this (UI) thread's context, so its callback marshals back here.
-        var progress = new Progress<int>(done =>
-        {
-            bar.Value = Math.Min(done, bar.Maximum);
-            label.Text = $"Importing {done:N0} of {total:N0} record(s)…";
-        });
+        var progress = new Progress<ImportProgress>(dialog.Report);
 
         ImportResult? result = null;
         Exception? failure = null;
@@ -1999,7 +1971,7 @@ public sealed class MainForm : Form
                 {
                     if (normalizeFixed) ImportEngine.Normalize(plan);
                     if (normalizeEncoding) ImportEngine.NormalizeEncoding(plan);
-                    return new ImportEngine(_repo!).Commit(plan, ((IProgress<int>)progress).Report);
+                    return new ImportEngine(_repo!).Commit(plan, ((IProgress<ImportProgress>)progress).Report);
                 });
             }
             catch (Exception ex)

@@ -611,6 +611,18 @@ public sealed class RecordRepository
 
     internal SqliteTransaction BeginTransaction() => _db.Connection.BeginTransaction();
 
+    /// <summary>Folds the write-ahead log back into the main database file and truncates it
+    /// (<c>PRAGMA wal_checkpoint(TRUNCATE)</c>). A big import can leave a WAL tens of MB long;
+    /// left alone it lingers and the next open pays to replay it. Call this once a bulk write
+    /// has committed. Best-effort: if another reader holds the WAL busy the checkpoint is a
+    /// no-op rather than an error, and the WAL is folded in later on the normal cadence.</summary>
+    public void Checkpoint()
+    {
+        using var cmd = _db.Connection.CreateCommand();
+        cmd.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+        cmd.ExecuteNonQuery();
+    }
+
     public string? GetSetting(string key)
     {
         using var cmd = _db.Connection.CreateCommand();

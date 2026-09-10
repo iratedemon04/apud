@@ -90,6 +90,32 @@ public class ImportExportTests : IDisposable
     }
 
     [Fact]
+    public void Commit_reports_progress_that_ends_exact_and_only_climbs()
+    {
+        // Drives the import progress dialog: enough records to cross the 100-record
+        // reporting stride a few times, so we see intermediate ticks, not just the final.
+        var sb = new System.Text.StringBuilder();
+        for (int i = 1; i <= 250; i++) sb.Append(Bib(i.ToString(), $"Title {i}")).Append('\n');
+        WriteFile("many.mrk", sb.ToString());
+        var plan = Engine.AnalyzeFolder(_dir);
+
+        var ticks = new List<ImportProgress>();
+        Engine.Commit(plan, ticks.Add);
+
+        Assert.True(ticks.Count >= 2, "expected intermediate progress ticks, not only the final");
+        // Every tick is internally consistent and scoped to this run's total.
+        Assert.All(ticks, t =>
+        {
+            Assert.Equal(250, t.Total);
+            Assert.Equal(t.Done, t.Bib + t.Aut);
+        });
+        // Done only ever climbs (never rewinds), and the last tick is the exact final split.
+        for (int i = 1; i < ticks.Count; i++)
+            Assert.True(ticks[i].Done >= ticks[i - 1].Done);
+        Assert.Equal(new ImportProgress(250, 250, 250, 0), ticks[^1]);
+    }
+
+    [Fact]
     public void Normalize_rewrites_fixed_field_placeholders_across_the_whole_run()
     {
         // An LC-style record whose leader and 008 blanks are drawn with '\'.

@@ -77,6 +77,12 @@ internal sealed record PlannedRecord(string FilePath, string Base, MarcRecord Re
 
 public sealed record ImportResult(int RecordsImported, int BibCount, int AutCount, IReadOnlyList<long> ImportedIds);
 
+/// <summary>A running snapshot of a <see cref="ImportEngine.Commit"/> in flight, handed to the
+/// progress callback so the UI can show exactly what has landed so far — not just a bare count.
+/// <paramref name="Done"/> is the total records inserted (== <paramref name="Bib"/> +
+/// <paramref name="Aut"/>); <paramref name="Total"/> is the run's target.</summary>
+public readonly record struct ImportProgress(int Done, int Total, int Bib, int Aut);
+
 /// <summary>
 /// Headless import: a list of .mrk files (or a folder) is parsed and reported on,
 /// then committed in ONE transaction — either everything lands or nothing does.
@@ -150,15 +156,17 @@ public sealed class ImportEngine
     /// transaction (all-or-nothing) — the trusted-migration path. Import-as-drafts does
     /// NOT come here: drafts are opened as unsaved working records in the app and never
     /// touch the DB (user, 2026-08-08). Blocks if the run cannot commit as pushed.</summary>
-    /// <param name="progress">Optional callback, invoked with the running count of records
-    /// inserted (every <see cref="ProgressStride"/> records, plus once at the end). Lets a
-    /// long import drive a progress bar. It is called on whatever thread runs Commit — the
-    /// UI-thread caller runs Commit on a background thread, so the callback must marshal.</param>
-    public ImportResult Commit(ImportPlan plan, Action<int>? progress = null)
+    /// <param name="progress">Optional callback, invoked with a running
+    /// <see cref="ImportProgress"/> snapshot (every <see cref="ProgressStride"/> records, plus
+    /// once at the end) so a long import can drive a detailed progress bar. It is called on
+    /// whatever thread runs Commit — the UI-thread caller runs Commit on a background thread,
+    /// so the callback must marshal back to the UI.</param>
+    public ImportResult Commit(ImportPlan plan, Action<ImportProgress>? progress = null)
     {
         if (!plan.Report.CanCommitAsPushed)
             throw new InvalidOperationException("Import run has errors and cannot be committed AS-PUSHED; see the report.");
 
+        int total = plan.Report.TotalRecords;
         var highest = new Dictionary<string, long> { ["BIB"] = 0, ["AUT"] = 0 };
         int bib = 0, aut = 0;
         var ids = new List<long>();
@@ -176,15 +184,21 @@ public sealed class ImportEngine
             if (long.TryParse(p.Record.ControlNumber, out long n) && n > highest[p.Base])
                 highest[p.Base] = n;
 
-            if (progress != null && ++done % ProgressStride == 0) progress(done);
+            if (progress != null && ++done % ProgressStride == 0)
+                progress(new ImportProgress(done, total, bib, aut));
         }
-        progress?.Invoke(bib + aut); // final tick, so the bar always lands on 100%
+        // Final tick, so the bar always lands on 100% with an exact final split.
+        progress?.Invoke(new ImportProgress(bib + aut, total, bib, aut));
 
         foreach (var (@base, top) in highest)
             if (top > 0)
                 _repo.BumpSequencePast(tx, @base, top);
 
         tx.Commit();
+
+        // Fold the WAL a big import just grew back into the main db so the next open is cheap.
+        _repo.Checkpoint();
+
         return new ImportResult(bib + aut, bib, aut, ids);
     }
 
