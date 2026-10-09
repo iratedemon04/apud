@@ -433,65 +433,8 @@ public sealed class MainForm : Form
         form.ShowDialog(this);
     }
 
-    private void ShowAbout()
-    {
-        using var about = new Form
-        {
-            Text = "About Apud",
-            FormBorderStyle = FormBorderStyle.FixedDialog,
-            StartPosition = FormStartPosition.CenterParent,
-            MinimizeBox = false,
-            MaximizeBox = false,
-            ClientSize = new Size(380, 150),
-        };
-        var label = new Label
-        {
-            Text = $"Apud {Application.ProductVersion}\nMARC21 original cataloguing.",
-            Dock = DockStyle.Top,
-            Height = 80,
-            TextAlign = ContentAlignment.MiddleCenter,
-            Font = new Font("Segoe UI", 9.75f),
-        };
-        var legal = new LinkLabel { Text = "Legal", AutoSize = true, Location = new Point(18, 108) };
-        legal.LinkClicked += (_, _) => ShowLegal(about);
-        var ok = new Button
-        {
-            Text = "OK",
-            DialogResult = DialogResult.OK,
-            Size = new Size(84, 28),
-            Location = new Point(about.ClientSize.Width - 100, 104),
-            Anchor = AnchorStyles.Right | AnchorStyles.Bottom,
-        };
-        about.Controls.Add(label);
-        about.Controls.Add(legal);
-        about.Controls.Add(ok);
-        about.AcceptButton = ok;
-        about.ShowDialog(this);
-    }
-
-    private void ShowLegal(IWin32Window owner) =>
-        MessageBox.Show(owner,
-            "Copyright (c) Alonso Cossío Vázquez 2026\n\n" +
-            "MIT License\n\n" + MitLicense,
-            "Legal", MessageBoxButtons.OK, MessageBoxIcon.Information);
-
-    /// <summary>The MIT License text (Apud is released under it).</summary>
-    private const string MitLicense =
-        "Permission is hereby granted, free of charge, to any person obtaining a copy " +
-        "of this software and associated documentation files (the \"Software\"), to deal " +
-        "in the Software without restriction, including without limitation the rights " +
-        "to use, copy, modify, merge, publish, distribute, sublicense, and/or sell " +
-        "copies of the Software, and to permit persons to whom the Software is " +
-        "furnished to do so, subject to the following conditions:\n\n" +
-        "The above copyright notice and this permission notice shall be included in all " +
-        "copies or substantial portions of the Software.\n\n" +
-        "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR " +
-        "IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, " +
-        "FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE " +
-        "AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER " +
-        "LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, " +
-        "OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE " +
-        "SOFTWARE.";
+    /// <summary>Help → About Apud (the dialog is <see cref="AboutDialog"/>).</summary>
+    private void ShowAbout() => AboutDialog.Show(this);
 
     /// <summary>Keymap dispatch through the framework's shortcut hook. Keys land
     /// here before the focused control; chords the keymap doesn't claim follow
@@ -1398,46 +1341,10 @@ public sealed class MainForm : Form
 
     // ---------- dialogs shared by the collaborators ----------
 
-    /// <summary>A minimal one-line text prompt (WinForms ships no InputBox). Returns the
-    /// entered text on OK, or null on Cancel. Built inline, Aleph-plain.</summary>
-    private string? PromptForText(string title, string prompt, string initial, bool mask = false)
-    {
-        using var dialog = new Form
-        {
-            Text = title,
-            FormBorderStyle = FormBorderStyle.FixedDialog,
-            StartPosition = FormStartPosition.CenterParent,
-            MinimizeBox = false,
-            MaximizeBox = false,
-            ClientSize = new Size(420, 130),
-        };
-        var label = new Label
-        {
-            Text = prompt,
-            Location = new Point(14, 12),
-            Size = new Size(392, 44),
-            Font = new Font("Segoe UI", 9.75f),
-        };
-        var box = new TextBox
-        {
-            Text = initial,
-            Location = new Point(14, 62),
-            Size = new Size(392, 24),
-            Font = new Font("Segoe UI", 9.75f),
-            UseSystemPasswordChar = mask,
-        };
-        var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Size = new Size(84, 28), Location = new Point(228, 94) };
-        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Size = new Size(84, 28), Location = new Point(320, 94) };
-        dialog.Controls.Add(label);
-        dialog.Controls.Add(box);
-        dialog.Controls.Add(ok);
-        dialog.Controls.Add(cancel);
-        dialog.AcceptButton = ok;
-        dialog.CancelButton = cancel;
-        box.SelectAll();
-
-        return dialog.ShowDialog(this) == DialogResult.OK ? box.Text : null;
-    }
+    /// <summary>The one-line text prompt the collaborators use (organization code, and the
+    /// masked key passphrase), owned by the main window. The dialog is <see cref="TextPrompt"/>.</summary>
+    private string? PromptForText(string title, string prompt, string initial, bool mask = false) =>
+        TextPrompt.Show(this, title, prompt, initial, mask);
 
     // ---------- delete record (Ctrl+Delete) ----------
 

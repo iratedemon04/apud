@@ -6,7 +6,7 @@ One pass through a real cataloguing session covers the whole MainForm refactor
 - Sections follow a session: launch/open → search → edit/push → import → export → backup → close.
 - Within a section the **riskiest items come first**.
 - Each item is tagged with the module whose commit it exercises, so a failure maps to a commit:
-  **[M3]** `CatalogueController`, **[M4]** `MenuBuilder`.
+  **[M3]** `CatalogueController`, **[M4]** `MenuBuilder`, **[M5]** `AboutDialog` + `TextPrompt`.
   **[M1]**/**[M2]** items are regression re-checks of the already-accepted `SyncCoordinator` /
   `SearchController`, included because later modules rewired their construction.
 - Tick `[x]` as each item is confirmed. A failure: note what happened next to the item.
@@ -51,6 +51,8 @@ What's left below is what only a human can see: dialogs, focus, threading, files
 - [ ] **[M4]** Clicking menu items runs them: Record → New Field / Validate Record / Validate & Push on an
       open record, Window → Zoom In / Zoom Out / Reset Zoom, Help → Field Help / Getting Started /
       Backup Times / About Apud.
+- [ ] **[M5]** Help → About Apud: version line, OK closes; the **Legal** link opens the copyright + MIT
+      licence text over the About box (accents in "Cossío Vázquez" intact).
 - [ ] **[M3]** File → Set BIB Output Folder → pick a folder → `Output folder set.` Push a BIB record
       (Ctrl+L) → `<001>.mrk` appears in that folder.
 - [ ] **[M3]** File → Set Authority Output Folder → pick a *different* folder. Push an AUT record → its
@@ -58,9 +60,9 @@ What's left below is what only a human can see: dialogs, focus, threading, files
 - [ ] **[M3]** Delete a pushed record (Ctrl+Delete, confirm) → its `.mrk` is removed from that base's
       output folder.
 - [ ] **[M3]** Reopen Set BIB Output Folder: the picker starts at the folder chosen before.
-- [ ] **[M3]** File → Set Organization Code: the prompt shows the current code. Enter a code →
-      `Organization code set to …`; push a new record → its 003 carries the code. Cancel changes nothing;
-      a blank entry → `Organization code cleared.`
+- [ ] **[M3][M5]** File → Set Organization Code: the prompt opens centred on Apud and shows the current
+      code. Enter a code → `Organization code set to …`; push a new record → its 003 carries the
+      code. Cancel (or Esc) changes nothing; a blank entry → `Organization code cleared.`
 
 ## 4. Import
 
@@ -91,7 +93,8 @@ What's left below is what only a human can see: dialogs, focus, threading, files
 - [ ] **[M1][M3]** Backup Server → Restore from Server → pick a snapshot → choose to open the restored
       copy: it opens as the current catalogue (title, counts, sidebar reset) — this now goes through
       `CatalogueController.Open`.
-- [ ] **[M1]** Ctrl+U backs up (passphrase → snapshot message).
+- [ ] **[M1][M5]** Ctrl+U backs up: the key-passphrase prompt (if your key has one) opens centred on
+      Apud and **masks what you type**; Enter accepts, Cancel aborts the backup; then the snapshot message.
 
 ## 7. Close
 
