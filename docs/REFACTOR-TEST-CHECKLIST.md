@@ -6,7 +6,7 @@ One pass through a real cataloguing session covers the whole MainForm refactor
 - Sections follow a session: launch/open → search → edit/push → import → export → backup → close.
 - Within a section the **riskiest items come first**.
 - Each item is tagged with the module whose commit it exercises, so a failure maps to a commit:
-  **[M3]** `CatalogueController`.
+  **[M3]** `CatalogueController`, **[M4]** `MenuBuilder`.
   **[M1]**/**[M2]** items are regression re-checks of the already-accepted `SyncCoordinator` /
   `SearchController`, included because later modules rewired their construction.
 - Tick `[x]` as each item is confirmed. A failure: note what happened next to the item.
@@ -22,6 +22,8 @@ What's left below is what only a human can see: dialogs, focus, threading, files
 
 ## 1. Launch and open a catalogue
 
+- [ ] **[M4]** The menu bar shows File, Base, Record, Window, Help, each with its entries and
+      shortcut text; Alt+F / Alt+B / Alt+R / Alt+W / Alt+H open them from the keyboard.
 - [ ] **[M3]** Launch Apud: it reopens the last catalogue by itself. Title bar reads `Apud — <path>`;
       message bar reads `Catalogue open — BIB: n, AUT: m record(s).` (plus `k draft(s) reopened.` if any).
 - [ ] **[M3]** Saved drafts from last session reappear in the sidebar on launch; the screen lands on
@@ -40,10 +42,15 @@ What's left below is what only a human can see: dialogs, focus, threading, files
 ## 2. Search
 
 - [ ] **[M2]** Search BIB, ↓/↑ through results, Enter/double-click opens the record into the sidebar.
-- [ ] **[M2]** Ctrl+B switches base: Base menu checkmark moves, scopes and result columns change.
+- [ ] **[M4][M2]** Ctrl+B switches base and the **Base menu checkmark moves** BIB ⇄ AUT (the menu's
+      BIB/AUT items now come from `MenuBuilder`); scopes and result columns change with it.
+- [ ] **[M4]** Base → AUT and Base → BIB clicked from the menu switch the base the same way.
 
 ## 3. Open, edit and push records
 
+- [ ] **[M4]** Clicking menu items runs them: Record → New Field / Validate Record / Validate & Push on an
+      open record, Window → Zoom In / Zoom Out / Reset Zoom, Help → Field Help / Getting Started /
+      Backup Times / About Apud.
 - [ ] **[M3]** File → Set BIB Output Folder → pick a folder → `Output folder set.` Push a BIB record
       (Ctrl+L) → `<001>.mrk` appears in that folder.
 - [ ] **[M3]** File → Set Authority Output Folder → pick a *different* folder. Push an AUT record → its

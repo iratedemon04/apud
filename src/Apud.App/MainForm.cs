@@ -179,82 +179,8 @@ public sealed class MainForm : Form
 
         _keymap = Keymap.LoadFile(_commands, Path.Combine(AppContext.BaseDirectory, Keymap.FileName));
 
-        // ----- menu (rendered from the command table) -----
-        _menu = new MenuStrip();
-
-        var file = new ToolStripMenuItem("&File");
-        file.DropDownItems.Add(MenuItem("catalogue.new"));
-        file.DropDownItems.Add(MenuItem("catalogue.open"));
-        file.DropDownItems.Add(new ToolStripSeparator());
-        file.DropDownItems.Add(MenuItem("catalogue.import"));
-        file.DropDownItems.Add(MenuItem("catalogue.marc-out"));
-        file.DropDownItems.Add(MenuItem("catalogue.marc-out-aut"));
-        file.DropDownItems.Add(MenuItem("catalogue.org-code"));
-        file.DropDownItems.Add(MenuItem("catalogue.export-base"));
-        file.DropDownItems.Add(MenuItem("catalogue.export-selected"));
-        file.DropDownItems.Add(new ToolStripSeparator());
-        var server = new ToolStripMenuItem("&Backup Server");
-        server.DropDownItems.Add(MenuItem("sync.configure"));
-        server.DropDownItems.Add(MenuItem("sync.upload"));
-        server.DropDownItems.Add(MenuItem("sync.restore"));
-        file.DropDownItems.Add(server);
-        file.DropDownItems.Add(new ToolStripSeparator());
-        file.DropDownItems.Add(MenuItem("app.exit"));
-
-        var @base = new ToolStripMenuItem("&Base");
-        _bibItem = MenuItem("base.bib");
-        _bibItem.Checked = true;
-        _autItem = MenuItem("base.aut");
-        @base.DropDownItems.Add(_bibItem);
-        @base.DropDownItems.Add(_autItem);
-        @base.DropDownItems.Add(new ToolStripSeparator());
-        @base.DropDownItems.Add(MenuItem("base.toggle"));
-
-        var record = new ToolStripMenuItem("&Record");
-        record.DropDownItems.Add(MenuItem("record.new"));
-        record.DropDownItems.Add(MenuItem("record.save-draft"));
-        record.DropDownItems.Add(MenuItem("record.save-template"));
-        record.DropDownItems.Add(new ToolStripSeparator());
-        record.DropDownItems.Add(MenuItem("record.undo"));
-        record.DropDownItems.Add(MenuItem("record.redo"));
-        record.DropDownItems.Add(new ToolStripSeparator());
-        record.DropDownItems.Add(MenuItem("field.edit"));
-        record.DropDownItems.Add(MenuItem("field.new"));
-        record.DropDownItems.Add(MenuItem("subfield.new"));
-        record.DropDownItems.Add(MenuItem("field.delete"));
-        record.DropDownItems.Add(MenuItem("field.delete-selected"));
-        record.DropDownItems.Add(MenuItem("subfield.delete"));
-        record.DropDownItems.Add(MenuItem("field.copy"));
-        record.DropDownItems.Add(MenuItem("field.paste"));
-        record.DropDownItems.Add(MenuItem("subfield.copy"));
-        record.DropDownItems.Add(MenuItem("subfield.paste"));
-        record.DropDownItems.Add(new ToolStripSeparator());
-        record.DropDownItems.Add(MenuItem("field.fixed-edit"));
-        record.DropDownItems.Add(MenuItem("field.validate"));
-        record.DropDownItems.Add(MenuItem("record.validate"));
-        record.DropDownItems.Add(MenuItem("record.push"));
-        record.DropDownItems.Add(new ToolStripSeparator());
-        record.DropDownItems.Add(MenuItem("record.close"));
-        record.DropDownItems.Add(MenuItem("record.close-all"));
-        record.DropDownItems.Add(MenuItem("record.delete"));
-
-        var window = new ToolStripMenuItem("&Window");
-        window.DropDownItems.Add(MenuItem("view.zoom-in"));
-        window.DropDownItems.Add(MenuItem("view.zoom-out"));
-        window.DropDownItems.Add(MenuItem("view.zoom-reset"));
-
-        var help = new ToolStripMenuItem("&Help");
-        help.DropDownItems.Add(MenuItem("help.field"));
-        help.DropDownItems.Add(MenuItem("help.intro"));
-        help.DropDownItems.Add(MenuItem("help.backup-time"));
-        help.DropDownItems.Add(new ToolStripSeparator());
-        help.DropDownItems.Add(MenuItem("help.about"));
-
-        _menu.Items.Add(file);
-        _menu.Items.Add(@base);
-        _menu.Items.Add(record);
-        _menu.Items.Add(window);
-        _menu.Items.Add(help);
+        // ----- menu (rendered from the command table; the layout is in MenuBuilder) -----
+        (_menu, _bibItem, _autItem) = MenuBuilder.Build(_commands, _keymap);
 
         // ----- sidebar: open records -----
         _openList = new ListView
@@ -448,18 +374,6 @@ public sealed class MainForm : Form
         // The "back up first?" prompt (and its push counter) belongs to the sync
         // collaborator; it returns false only when the user chose Cancel.
         if (!_sync.OfferBackupBeforeClose()) e.Cancel = true;
-    }
-
-    /// <summary>Menu item for a command: text, handler and shortcut display all
-    /// come from the one table entry, so they can never disagree.</summary>
-    private ToolStripMenuItem MenuItem(string commandId)
-    {
-        var cmd = _commands.Find(commandId)
-            ?? throw new InvalidOperationException($"Menu references unregistered command {commandId}.");
-        var item = new ToolStripMenuItem(cmd.Name, null, (_, _) => cmd.Execute());
-        if (_keymap.BindingFor(commandId) is string chord)
-            item.ShortcutKeyDisplayString = chord;
-        return item;
     }
 
     /// <summary>F1: show the offline MARC21 help for the field at the caret in the
@@ -1524,6 +1438,8 @@ public sealed class MainForm : Form
 
         return dialog.ShowDialog(this) == DialogResult.OK ? box.Text : null;
     }
+
+    // ---------- delete record (Ctrl+Delete) ----------
 
     /// <summary>Deletes the displayed record from the catalogue AND its
     /// &lt;001&gt;.mrk file (user request). Irreversible, so it confirms
