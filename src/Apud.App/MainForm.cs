@@ -47,6 +47,7 @@ public sealed class MainForm : Form
     private MarcField? _fieldClipboard;      // Ctrl+T copy field / Alt+T paste
     private MarcSubfield? _subfieldClipboard; // Ctrl+S copy subfield / Alt+S paste
     private readonly SyncCoordinator _sync;  // server backup/restore + the pushes-since-sync counter
+    private readonly CatalogueController _catalogue; // new/open catalogue, import, export, output folders, org code
 
     private CommandContext ActiveContext =>
         _recordView.Visible ? CommandContext.Editor : CommandContext.Search;
@@ -63,6 +64,42 @@ public sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(950, 620);
 
+        // The collaborators are built first, before the command table binds to their
+        // methods, in dependency order: _catalogue reads _search's base and _sync calls
+        // _catalogue.Open, so no lambda can see an unassigned collaborator.
+        //
+        // The Search screen (docs/MAINFORM-REFACTOR-PLAN.md step 2). Like the others it
+        // never gets `this`, only a repo getter, the catalogue guard, the message sink,
+        // the "open this record id" bridge to the editor, and a callback to keep the
+        // Base menu's checkmarks in step (deferred, so _bibItem/_autItem are fine null here).
+        _search = new SearchController(
+            repo: () => _repo,
+            requireCatalogue: RequireCatalogue,
+            setMessage: SetMessage,
+            openRecordById: OpenRecordById,
+            onBaseChanged: UpdateBaseChecks);
+
+        // Catalogue lifecycle + the File commands (docs/MAINFORM-REFACTOR-PLAN.md step 3).
+        // Same rules: never `this` as a form, only the owner window plus getters/callbacks.
+        // It opens the file; AttachCatalogue (here) swaps the _db/_repo fields the other
+        // collaborators read and resets the panels. Built before the command table, which
+        // binds to its methods.
+        _catalogue = new CatalogueController(
+            owner: this,
+            appState: _appState,
+            requireCatalogue: RequireCatalogue,
+            repo: () => _repo,
+            catalogPath: () => _catalogPath,
+            currentBase: () => _search.CurrentBase,
+            selectedRecordIds: SelectedSavedRecordIds,
+            promptText: PromptForText,
+            setMessage: SetMessage,
+            startFolder: StartFolder,
+            rememberFolder: RememberFolder,
+            attachCatalogue: AttachCatalogue,
+            openRecordById: OpenRecordById,
+            openImportedDrafts: OpenImportedDrafts);
+
         // Server backup/restore lives in its own collaborator (docs/MAINFORM-REFACTOR-PLAN.md
         // step 1). It gets only what it needs — never `this` — via lazy getters and callbacks;
         // the lambdas are deferred, so fields still null here (e.g. _messageBar) are fine.
@@ -77,34 +114,22 @@ public sealed class MainForm : Form
             refreshStatus: () => _messageBar?.Refresh(), // assigned later in this ctor; the lambda only runs post-construction
             startFolder: StartFolder,
             rememberFolder: RememberFolder,
-            openCatalogue: path => OpenCatalog(path));
-
-        // The Search screen is its own collaborator too (docs/MAINFORM-REFACTOR-PLAN.md
-        // step 2). Built early, before the command table binds to it — like _sync it
-        // never gets `this`, only a repo getter, the catalogue guard, the message sink,
-        // the "open this record id" bridge to the editor, and a callback to keep the
-        // Base menu's checkmarks in step (deferred, so _bibItem/_autItem are fine null here).
-        _search = new SearchController(
-            repo: () => _repo,
-            requireCatalogue: RequireCatalogue,
-            setMessage: SetMessage,
-            openRecordById: OpenRecordById,
-            onBaseChanged: UpdateBaseChecks);
+            openCatalogue: path => _catalogue.Open(path));
 
         // ----- command table (Module 6 step 1) -----
         // Menus render from this table and keymap.json binds against it.
         // Catalogue commands are menu-only (§6.2: record commands own the keyboard).
-        _commands.Add(new Command { Id = "catalogue.new", Name = "&New Catalogue...", Execute = NewCatalog });
-        _commands.Add(new Command { Id = "catalogue.open", Name = "&Open Catalogue...", DefaultKey = "Ctrl+O", Execute = OpenCatalogDialog });
-        _commands.Add(new Command { Id = "catalogue.import", Name = "&Import Records...", DefaultKey = "Ctrl+I", Execute = ImportRecords });
-        _commands.Add(new Command { Id = "catalogue.marc-out", Name = "Set &BIB Output Folder...", Execute = () => SetMarcOutFolder("BIB") });
-        _commands.Add(new Command { Id = "catalogue.marc-out-aut", Name = "Set &Authority Output Folder...", Execute = () => SetMarcOutFolder("AUT") });
-        _commands.Add(new Command { Id = "catalogue.org-code", Name = "Set &Organization Code...", Execute = SetOrgCode });
+        _commands.Add(new Command { Id = "catalogue.new", Name = "&New Catalogue...", Execute = _catalogue.New });
+        _commands.Add(new Command { Id = "catalogue.open", Name = "&Open Catalogue...", DefaultKey = "Ctrl+O", Execute = _catalogue.OpenDialog });
+        _commands.Add(new Command { Id = "catalogue.import", Name = "&Import Records...", DefaultKey = "Ctrl+I", Execute = _catalogue.Import });
+        _commands.Add(new Command { Id = "catalogue.marc-out", Name = "Set &BIB Output Folder...", Execute = () => _catalogue.SetMarcOutFolder("BIB") });
+        _commands.Add(new Command { Id = "catalogue.marc-out-aut", Name = "Set &Authority Output Folder...", Execute = () => _catalogue.SetMarcOutFolder("AUT") });
+        _commands.Add(new Command { Id = "catalogue.org-code", Name = "Set &Organization Code...", Execute = _catalogue.SetOrgCode });
         _commands.Add(new Command { Id = "sync.configure", Name = "&Set Server...", Execute = _sync.Configure });
         _commands.Add(new Command { Id = "sync.upload", Name = "&Back Up to Server", DefaultKey = "Ctrl+U", Execute = _sync.Upload });
         _commands.Add(new Command { Id = "sync.restore", Name = "&Restore from Server...", Execute = _sync.Restore });
-        _commands.Add(new Command { Id = "catalogue.export-base", Name = "Export &Base...", Execute = ExportBase });
-        _commands.Add(new Command { Id = "catalogue.export-selected", Name = "Export &Selected...", Execute = ExportSelected });
+        _commands.Add(new Command { Id = "catalogue.export-base", Name = "Export &Base...", Execute = _catalogue.ExportBase });
+        _commands.Add(new Command { Id = "catalogue.export-selected", Name = "Export &Selected...", Execute = _catalogue.ExportSelected });
         _commands.Add(new Command { Id = "app.exit", Name = "E&xit", DefaultKey = "Alt+F4", Execute = Close });
         _commands.Add(new Command { Id = "base.bib", Name = "&BIB — Bibliographic", Execute = () => _search.SetBase("BIB") });
         _commands.Add(new Command { Id = "base.aut", Name = "&AUT — Authority", Execute = () => _search.SetBase("AUT") });
@@ -380,12 +405,12 @@ public sealed class MainForm : Form
         {
             // Reopen the last catalogue on launch when it still exists (user,
             // 2026-08-08). A moved/deleted one is silently skipped; a corrupt one
-            // reports through OpenCatalog's own dialog and leaves nothing open.
+            // reports through CatalogueController.Open's own dialog and leaves nothing open.
             if (!string.IsNullOrEmpty(_appState.LastCatalogue) && File.Exists(_appState.LastCatalogue))
-                OpenCatalog(_appState.LastCatalogue);
+                _catalogue.Open(_appState.LastCatalogue);
 
             // Config diagnostics (bad keymap/profile entries) always win the message
-            // bar; otherwise OpenCatalog's own "Catalogue open…" line stands, and only
+            // bar; otherwise AttachCatalogue's own "Catalogue open…" line stands, and only
             // when nothing opened do we prompt to open one.
             if (configReports.Count > 0)
                 SetMessage(string.Join("  |  ", configReports));
@@ -679,63 +704,12 @@ public sealed class MainForm : Form
         _appState.Save();
     }
 
-    private void NewCatalog()
+    /// <summary>Makes a freshly opened database the current catalogue. Called by
+    /// <see cref="CatalogueController.Open"/> once the file has opened cleanly (New,
+    /// Open, launch reopen, Restore): swaps the catalogue fields every collaborator
+    /// reads, then resets everything on screen.</summary>
+    private void AttachCatalogue(ApudDatabase db, string path)
     {
-        using var dialog = new SaveFileDialog
-        {
-            Title = "New Catalogue",
-            InitialDirectory = StartFolder(),
-            FileName = "catalog.db",
-            Filter = "Apud catalogue (*.db)|*.db",
-            OverwritePrompt = true,
-        };
-        if (dialog.ShowDialog(this) != DialogResult.OK) return;
-
-        RememberFolder(Path.GetDirectoryName(dialog.FileName));
-
-        // The dialog already asked about overwriting; a stale file must not be
-        // silently opened as an existing catalogue.
-        if (File.Exists(dialog.FileName)) File.Delete(dialog.FileName);
-        OpenCatalog(dialog.FileName, createNew: true);
-    }
-
-    private void OpenCatalogDialog()
-    {
-        using var dialog = new OpenFileDialog
-        {
-            Title = "Open Catalogue",
-            InitialDirectory = StartFolder(),
-            Filter = "Apud catalogue (*.db)|*.db|All files (*.*)|*.*",
-        };
-        if (dialog.ShowDialog(this) != DialogResult.OK) return;
-
-        RememberFolder(Path.GetDirectoryName(dialog.FileName));
-        OpenCatalog(dialog.FileName);
-    }
-
-    private void OpenCatalog(string path, bool createNew = false)
-    {
-        // Opening never creates: SQLite would happily conjure an empty database
-        // at a mistyped path, and this software creates nothing on its own.
-        if (!createNew && !File.Exists(path))
-        {
-            MessageBox.Show(this, $"There is no catalogue at:\n{path}", "Cannot open catalogue",
-                MessageBoxButtons.OK, MessageBoxIcon.Error);
-            return;
-        }
-
-        ApudDatabase db;
-        try
-        {
-            db = ApudDatabase.Open(path);
-        }
-        catch (Exception e) when (e is InvalidOperationException or Microsoft.Data.Sqlite.SqliteException)
-        {
-            MessageBox.Show(this, e.Message, "Cannot open catalogue",
-                MessageBoxButtons.OK, MessageBoxIcon.Error);
-            return;
-        }
-
         _db?.Dispose();
         _db = db;
         _repo = new RecordRepository(db);
@@ -821,6 +795,13 @@ public sealed class MainForm : Form
             _openList.Items.Add(MakeSidebarItem(doc));
         }
     }
+
+    /// <summary>Ids of the saved (in-catalogue) records selected in the sidebar —
+    /// what Export Selected writes. Never-saved records (id 0) are skipped.</summary>
+    private IReadOnlyList<long> SelectedSavedRecordIds() =>
+        _openList.SelectedItems.Cast<ListViewItem>()
+            .Select(i => i.Tag).OfType<EditorDocument>()
+            .Where(d => d.Stored.Id != 0).Select(d => d.Stored.Id).ToList();
 
     private void ShowSelectedOpenRecord()
     {
@@ -1411,7 +1392,7 @@ public sealed class MainForm : Form
         string mirrorNote = "";
         try
         {
-            RecordMirror.Write(MarcOutFolder(doc.Stored.Base), doc.Record);
+            RecordMirror.Write(_catalogue.MarcOutFolder(doc.Stored.Base), doc.Record);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -1501,57 +1482,7 @@ public sealed class MainForm : Form
         _grid.FocusElement(r.FieldIndex, r.SubfieldIndex, BoxPart.Value);
     }
 
-    // ---------- MARC output folder ----------
-
-    private const string MarcOutSetting = "marc_out_folder";
-    private const string MarcOutSettingAut = "marc_out_folder_aut";
-
-    /// <summary>The settings key and default subfolder for a base. BIB and AUT
-    /// mirror to separate folders (user request 2026-08-01) — same mechanism as
-    /// bib, its own chosen folder — because their control numbers are numbered
-    /// independently and would otherwise collide (BIB 758.mrk vs AUT 758.mrk).</summary>
-    private static (string Key, string DefaultName) MarcOutSpec(string @base) => @base == "AUT"
-        ? (MarcOutSettingAut, RecordMirror.DefaultFolderNameAut)
-        : (MarcOutSetting, RecordMirror.DefaultFolderName);
-
-    /// <summary>The folder a base's pushed records are mirrored to: the
-    /// cataloguer's chosen folder (persisted per catalogue) if set, else null —
-    /// meaning no .mrk is written and the record lives only in the .db (user
-    /// request 2026-08-01: an unset folder mirrors nothing, rather than defaulting
-    /// to a MARC_OUT subfolder beside the .db).</summary>
-    private string? MarcOutFolder(string @base)
-    {
-        var (key, _) = MarcOutSpec(@base);
-        string? configured = _repo?.GetSetting(key);
-        return string.IsNullOrWhiteSpace(configured) ? null : configured.Trim();
-    }
-
-    /// <summary>File → Set BIB / Authority Output Folder: pick the folder Apud
-    /// writes each pushed record's .mrk into for that base. Stored in the
-    /// catalogue's settings (remembered per catalogue). Cancelling leaves the
-    /// current choice; picking the same place is idempotent.</summary>
-    /// <summary>File → Set Organization Code: the MARC org code Apud stamps into 003
-    /// on push (per-catalogue, stored in the setting table). A per-catalogue constant,
-    /// not per-record content — the one org-level value Apud fills for you. Blank turns
-    /// 003 auto-fill back off. This is a single focused command, not a Settings dialog
-    /// (that was cut Module 10); it mirrors the Set … Output Folder commands.</summary>
-    private void SetOrgCode()
-    {
-        if (!RequireCatalogue()) return;
-
-        string current = _repo.GetSetting("org_code") ?? "";
-        if (PromptForText(
-                "Set Organization Code",
-                "MARC organization code for field 003. Leave blank for none.",
-                current) is not string entered)
-            return; // cancelled, nothing changes
-
-        string code = entered.Trim();
-        _repo.SetSetting("org_code", code);
-        SetMessage(code.Length > 0
-            ? $"Organization code set to {code}."
-            : "Organization code cleared.");
-    }
+    // ---------- dialogs shared by the collaborators ----------
 
     /// <summary>A minimal one-line text prompt (WinForms ships no InputBox). Returns the
     /// entered text on OK, or null on Cancel. Built inline, Aleph-plain.</summary>
@@ -1592,26 +1523,6 @@ public sealed class MainForm : Form
         box.SelectAll();
 
         return dialog.ShowDialog(this) == DialogResult.OK ? box.Text : null;
-    }
-
-    private void SetMarcOutFolder(string @base)
-    {
-        if (!RequireCatalogue()) return;
-
-        var (key, defaultName) = MarcOutSpec(@base);
-        string? current = _repo.GetSetting(key);
-        using var dialog = new FolderBrowserDialog
-        {
-            Description = $"Choose the folder Apud writes each pushed {@base} record to (as <001>.mrk).",
-            UseDescriptionForTitle = true,
-            SelectedPath = !string.IsNullOrWhiteSpace(current) && Directory.Exists(current)
-                ? current
-                : RecordMirror.DefaultFolderFor(_catalogPath, defaultName) is string d && Directory.Exists(d) ? d : "",
-        };
-        if (dialog.ShowDialog(this) != DialogResult.OK) return;
-
-        _repo.SetSetting(key, dialog.SelectedPath);
-        SetMessage("Output folder set.");
     }
 
     /// <summary>Deletes the displayed record from the catalogue AND its
@@ -1670,7 +1581,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        try { RecordMirror.Delete(MarcOutFolder(doc.Stored.Base), doc.Record.ControlNumber); }
+        try { RecordMirror.Delete(_catalogue.MarcOutFolder(doc.Stored.Base), doc.Record.ControlNumber); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             SetMessage($"Record {cn} deleted from the catalogue, but its .mrk file could not be removed: {ex.Message}");
@@ -1807,210 +1718,7 @@ public sealed class MainForm : Form
         SetMessage("Template saved.");
     }
 
-    // ---------- import ----------
-
-    /// <summary>File → Import Records: one menu entry that first asks whether to
-    /// import a single file or a whole folder, then routes to the matching picker
-    /// (user request 2026-08-01 — the two former commands collapsed into one, the
-    /// scope chosen inside Apud rather than by which menu item was clicked).</summary>
-    private void ImportRecords()
-    {
-        if (!RequireCatalogue()) return;
-        switch (ChooseImportSource())
-        {
-            case ImportSource.File: ImportFiles(); break;
-            case ImportSource.Folder: ImportFolder(); break;
-            // Cancel: do nothing.
-        }
-    }
-
-    private enum ImportSource { Cancel, File, Folder }
-
-    /// <summary>A tiny two-button chooser (single file vs. whole folder), in the
-    /// app's inline-dialog style (cf. PickSnapshot). Esc / Cancel = do nothing.</summary>
-    private ImportSource ChooseImportSource()
-    {
-        using var dialog = new Form
-        {
-            Text = "Import Records",
-            FormBorderStyle = FormBorderStyle.FixedDialog,
-            StartPosition = FormStartPosition.CenterParent,
-            MinimizeBox = false,
-            MaximizeBox = false,
-            ClientSize = new Size(372, 150),
-        };
-        var prompt = new Label
-        {
-            Text = "Import a single file, or every .mrk in a folder?",
-            Location = new Point(16, 18),
-            Size = new Size(340, 22),
-        };
-        var file = new Button { Text = "Single &File...", Size = new Size(160, 38), Location = new Point(16, 52) };
-        var folder = new Button { Text = "Whole F&older...", Size = new Size(160, 38), Location = new Point(196, 52) };
-        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Size = new Size(90, 28), Location = new Point(266, 110) };
-
-        var result = ImportSource.Cancel;
-        file.Click += (_, _) => { result = ImportSource.File; dialog.Close(); };
-        folder.Click += (_, _) => { result = ImportSource.Folder; dialog.Close(); };
-
-        dialog.Controls.Add(prompt);
-        dialog.Controls.Add(file);
-        dialog.Controls.Add(folder);
-        dialog.Controls.Add(cancel);
-        dialog.CancelButton = cancel;
-
-        dialog.ShowDialog(this);
-        return result;
-    }
-
-    /// <summary>Pick one or more .mrk files (e.g. a single authority file MarcEdit
-    /// converted into your Downloads) and import just those. Each record routes to
-    /// BIB or AUT by its leader, same as a folder import.</summary>
-    private void ImportFiles()
-    {
-        if (!RequireCatalogue()) return;
-
-        using var dialog = new OpenFileDialog
-        {
-            Title = "Import Records",
-            InitialDirectory = StartFolder(),
-            Filter = "MARC text (*.mrk)|*.mrk|All files (*.*)|*.*",
-            Multiselect = true,
-        };
-        if (dialog.ShowDialog(this) != DialogResult.OK) return;
-
-        var files = dialog.FileNames;
-        RememberFolder(Path.GetDirectoryName(files[0]));
-        string source = files.Length == 1 ? files[0] : $"{files.Length} files";
-        RunImport(source, new ImportEngine(_repo).Analyze(files));
-    }
-
-    /// <summary>Import every .mrk in a folder tree (reached from the Import
-    /// Records chooser).</summary>
-    private void ImportFolder()
-    {
-        if (!RequireCatalogue()) return;
-
-        using var dialog = new FolderBrowserDialog
-        {
-            Description = "Choose a folder; every .mrk file in it (and its subfolders) will be imported.",
-            UseDescriptionForTitle = true,
-            SelectedPath = StartFolder(),
-        };
-        if (dialog.ShowDialog(this) != DialogResult.OK) return;
-
-        RememberFolder(dialog.SelectedPath);
-        RunImport(dialog.SelectedPath, new ImportEngine(_repo).AnalyzeFolder(dialog.SelectedPath));
-    }
-
-    /// <summary>The shared analyze → wizard → commit path for both import
-    /// commands. The commit is one all-or-nothing transaction; Cancel writes
-    /// nothing.</summary>
-    private void RunImport(string source, ImportPlan plan)
-    {
-        var report = plan.Report;
-        if (report.TotalRecords == 0)
-        {
-            MessageBox.Show(this, "No records found (no .mrk files, or all empty).",
-                "Import", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return;
-        }
-
-        using var wizard = new ImportWizardForm(source, report,
-            _appState.NormalizeFixedFieldsOnImport, _appState.NormalizeEncodingOnImport);
-        if (wizard.ShowDialog(this) != DialogResult.OK) return; // nothing committed
-
-        // Remember the normalize choices and, when on, apply them before anything else
-        // touches the parsed records — this feeds both the drafts and the pushed path below.
-        if (wizard.NormalizeFixedFields != _appState.NormalizeFixedFieldsOnImport ||
-            wizard.NormalizeEncoding != _appState.NormalizeEncodingOnImport)
-        {
-            _appState.NormalizeFixedFieldsOnImport = wizard.NormalizeFixedFields;
-            _appState.NormalizeEncodingOnImport = wizard.NormalizeEncoding;
-            _appState.Save();
-        }
-        // Import-as-drafts: bring dirty LC records in as UNSAVED working drafts to
-        // clean up, not into the catalogue (user, 2026-08-08). They live only in the
-        // session — Ctrl+D saves one as a draft file, Ctrl+L pushes it, and any left
-        // unsaved are discarded on close (correct behaviour). This is the small-batch
-        // path (a handful of dirty LC records), so the normalize + sidebar build stay
-        // on the UI thread.
-        if (wizard.SelectedMode == ImportMode.AsDrafts)
-        {
-            if (wizard.NormalizeFixedFields) ImportEngine.Normalize(plan);
-            if (wizard.NormalizeEncoding) ImportEngine.NormalizeEncoding(plan);
-            OpenImportedDrafts(new ImportEngine(_repo!).ParsedRecords(plan));
-            return;
-        }
-
-        // Pushed path: this is the whole-catalogue case (tens of thousands of records
-        // seen in the wild). Normalize + Commit run on a background thread behind a modal
-        // progress dialog, so the window keeps repainting (no "Not Responding") and the
-        // cataloguer watches it move instead of guessing whether it hung.
-        CommitImportWithProgress(plan, wizard.NormalizeFixedFields, wizard.NormalizeEncoding);
-    }
-
-    /// <summary>Runs the pushed-import Commit (and any normalize passes) off the UI thread
-    /// behind a modal progress bar. The dialog owns a nested message loop while
-    /// <see cref="Task.Run"/> does the work, so the UI stays live; the background task
-    /// closes the dialog when it finishes or throws. Nothing else can touch the repo while
-    /// the modal is up, so the single-connection SQLite repo is never hit concurrently.</summary>
-    private void CommitImportWithProgress(ImportPlan plan, bool normalizeFixed, bool normalizeEncoding)
-    {
-        int total = plan.Report.TotalRecords;
-
-        using var dialog = new ImportProgressForm(total);
-
-        // Progress<T> captures this (UI) thread's context, so its callback marshals back here.
-        var progress = new Progress<ImportProgress>(dialog.Report);
-
-        ImportResult? result = null;
-        Exception? failure = null;
-
-        dialog.Shown += async (_, _) =>
-        {
-            try
-            {
-                result = await Task.Run(() =>
-                {
-                    if (normalizeFixed) ImportEngine.Normalize(plan);
-                    if (normalizeEncoding) ImportEngine.NormalizeEncoding(plan);
-                    return new ImportEngine(_repo!).Commit(plan, ((IProgress<ImportProgress>)progress).Report);
-                });
-            }
-            catch (Exception ex)
-            {
-                failure = ex;
-            }
-            finally
-            {
-                dialog.Close();
-            }
-        };
-        dialog.ShowDialog(this); // blocks until the background task closes it
-
-        if (failure is Microsoft.Data.Sqlite.SqliteException e)
-        {
-            // e.g. a record inserted between Analyze and Commit now collides;
-            // the transaction rolled back — the catalogue is untouched.
-            MessageBox.Show(this, $"Import failed and nothing was committed.\n\n{e.Message}",
-                "Import", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            return;
-        }
-        if (failure is not null)
-        {
-            MessageBox.Show(this, $"Import failed and nothing was committed.\n\n{failure.Message}",
-                "Import", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            return;
-        }
-        if (result is null) return;
-
-        SetMessage($"Imported {result.RecordsImported} record(s) — BIB {result.BibCount}, AUT {result.AutCount}.");
-        // A single pushed record opens straight into the editor — no hunting for
-        // it in search afterwards (task 1).
-        if (result.ImportedIds.Count == 1)
-            OpenRecordById(result.ImportedIds[0]);
-    }
+    // ---------- import (the sidebar side; the rest is CatalogueController) ----------
 
     /// <summary>Import-as-drafts: open each parsed record as an UNSAVED working draft
     /// in the sidebar. Added quietly (via <see cref="MakeSidebarItem"/>); the first is
@@ -2027,54 +1735,6 @@ public sealed class MainForm : Form
         }
         if (first is not null) { _openList.SelectedItems.Clear(); first.Selected = true; } // → record view
         SetMessage($"Imported {records.Count} record(s) as drafts.");
-    }
-
-    // ---------- export ----------
-
-    private void ExportBase()
-    {
-        if (!RequireCatalogue()) return;
-        int count = _repo.Count(_search.CurrentBase);
-        if (count == 0) { SetMessage($"{_search.CurrentBase} is empty — nothing to export."); return; }
-        ExportTo($"{_search.CurrentBase}.mrk", path =>
-        {
-            new ExportEngine(_repo).ExportBaseToFile(_search.CurrentBase, path);
-            return count;
-        });
-    }
-
-    private void ExportSelected()
-    {
-        if (!RequireCatalogue()) return;
-        var ids = _openList.SelectedItems.Cast<ListViewItem>()
-            .Select(i => i.Tag).OfType<EditorDocument>()
-            .Where(d => d.Stored.Id != 0).Select(d => d.Stored.Id).ToList();
-        if (ids.Count == 0)
-        {
-            SetMessage("Select one or more saved records in the sidebar first.");
-            return;
-        }
-        ExportTo("selection.mrk", path =>
-        {
-            new ExportEngine(_repo!).ExportToFile(ids, path);
-            return ids.Count;
-        });
-    }
-
-    private void ExportTo(string suggestedName, Func<string, int> write)
-    {
-        using var dialog = new SaveFileDialog
-        {
-            Title = "Export",
-            InitialDirectory = StartFolder(),
-            FileName = suggestedName,
-            Filter = "MARC text (*.mrk)|*.mrk",
-            OverwritePrompt = true,
-        };
-        if (dialog.ShowDialog(this) != DialogResult.OK) return;
-        RememberFolder(Path.GetDirectoryName(dialog.FileName));
-        int count = write(dialog.FileName);
-        SetMessage($"Exported {count} record(s) to {dialog.FileName}.");
     }
 
     private void SetMessage(string text) => _messageLabel.Text = text;

@@ -93,17 +93,17 @@ public sealed class MainFormWiringTests : IClassFixture<MainFormWiringTests.Snap
     public void Every_command_routes_to_its_handler()
     {
         AssertLines("""
-            catalogue.new -> MainForm.NewCatalog
-            catalogue.open -> MainForm.OpenCatalogDialog
-            catalogue.import -> MainForm.ImportRecords
-            catalogue.marc-out -> λ "BIB" MainForm.SetMarcOutFolder
-            catalogue.marc-out-aut -> λ "AUT" MainForm.SetMarcOutFolder
-            catalogue.org-code -> MainForm.SetOrgCode
+            catalogue.new -> CatalogueController.New
+            catalogue.open -> CatalogueController.OpenDialog
+            catalogue.import -> CatalogueController.Import
+            catalogue.marc-out -> λ "BIB" CatalogueController.SetMarcOutFolder
+            catalogue.marc-out-aut -> λ "AUT" CatalogueController.SetMarcOutFolder
+            catalogue.org-code -> CatalogueController.SetOrgCode
             sync.configure -> SyncCoordinator.Configure
             sync.upload -> SyncCoordinator.Upload
             sync.restore -> SyncCoordinator.Restore
-            catalogue.export-base -> MainForm.ExportBase
-            catalogue.export-selected -> MainForm.ExportSelected
+            catalogue.export-base -> CatalogueController.ExportBase
+            catalogue.export-selected -> CatalogueController.ExportSelected
             app.exit -> Form.Close
             base.bib -> λ "BIB" SearchController.SetBase
             base.aut -> λ "AUT" SearchController.SetBase
