@@ -51,6 +51,10 @@ public sealed class MainForm : Form
     private CommandContext ActiveContext =>
         _recordView.Visible ? CommandContext.Editor : CommandContext.Search;
 
+    /// <summary>The command table, exposed for MainFormWiringTests, which pin every
+    /// command's key, context and handler, and the menus rendered from it.</summary>
+    internal CommandRegistry CommandTable => _commands;
+
     public MainForm()
     {
         Text = "Apud";
